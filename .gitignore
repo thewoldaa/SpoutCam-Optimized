@@ -12,8 +12,9 @@ build/
 *.log
 *.idb
 
-# Compiled filter, produced by the build
+# Compiled output, produced by the build
 *.ax
+*.exe
 
 # Visual Studio
 .vs/
@@ -22,3 +23,7 @@ build/
 
 # Fetched by build.cmd, not checked in
 SpoutCamSettings/packages/
+
+# WebView2 browser profile. The program puts this under local app data now,
+# but an older build dropped it beside the executable.
+*.WebView2/

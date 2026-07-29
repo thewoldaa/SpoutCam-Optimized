@@ -99,6 +99,12 @@ cd SpoutCamSettings
 build.cmd x64
 ```
 
+The finished program lands at the top of the repository as
+`SpoutCamSettings.exe`, next to the `SpoutCam` folder. Registration looks for the
+filter relative to the program, so leaving it there means the Register button
+works without being pointed at anything. `build.cmd x86` produces
+`SpoutCamSettings32.exe` beside it.
+
 It needs the WebView2 SDK in `SpoutCamSettings\packages`:
 
 ```

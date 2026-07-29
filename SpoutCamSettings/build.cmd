@@ -15,16 +15,23 @@ if "%ARCH%"=="" set ARCH=x64
 if /i "%ARCH%"=="x86" (
     set VCARCH=x86
     set WVARCH=x86
+    set EXENAME=SpoutCamSettings32.exe
 ) else (
     set ARCH=x64
     set VCARCH=x64
     set WVARCH=x64
+    set EXENAME=SpoutCamSettings.exe
 )
 
 set ROOT=%~dp0
 set SPOUTDX=%ROOT%..\SpoutCam\SpoutDX\source
 set WEBVIEW=%ROOT%packages\WebView2\build\native
 set OUT=%ROOT%build\%ARCH%
+
+rem The finished program goes to the repository root, next to the SpoutCam
+rem folder. Registration looks for the filter relative to the program, so this
+rem is the one place it works without being told where anything is.
+set EXEDIR=%ROOT%..
 
 if not exist "%SPOUTDX%\SpoutDX.cpp" (
     echo ERROR: SpoutDX sources not found at "%SPOUTDX%"
@@ -74,7 +81,7 @@ if errorlevel 1 exit /b 1
 
 cl /nologo /EHsc /O2 /MT /W3 /std:c++17 /DUNICODE /D_UNICODE ^
    /I "%ROOT%src" /I "%WEBVIEW%\include" /I "%SPOUTDX%" ^
-   /Fo"%OUT%\\" /Fe"%OUT%\SpoutCamSettings.exe" ^
+   /Fo"%OUT%\\" /Fe"%EXEDIR%\%EXENAME%" ^
    "%ROOT%src\main.cpp" ^
    "%ROOT%src\preview.cpp" ^
    "%SPOUTDX%\SpoutDX.cpp" ^
@@ -84,7 +91,7 @@ cl /nologo /EHsc /O2 /MT /W3 /std:c++17 /DUNICODE /D_UNICODE ^
    "%SPOUTDX%\SpoutSenderNames.cpp" ^
    "%SPOUTDX%\SpoutSharedMemory.cpp" ^
    "%SPOUTDX%\SpoutUtils.cpp" ^
-   /link /SUBSYSTEM:WINDOWS ^
+   /link /SUBSYSTEM:WINDOWS /MANIFEST:EMBED ^
    "%OUT%\app.res" ^
    "%WEBVIEW%\%WVARCH%\WebView2LoaderStatic.lib" ^
    d3d11.lib dxgi.lib msimg32.lib shell32.lib advapi32.lib user32.lib gdi32.lib ^
@@ -93,5 +100,5 @@ cl /nologo /EHsc /O2 /MT /W3 /std:c++17 /DUNICODE /D_UNICODE ^
 if errorlevel 1 exit /b 1
 
 echo.
-echo Built %OUT%\SpoutCamSettings.exe
+for %%p in ("%EXEDIR%\%EXENAME%") do echo Built %%~fp
 endlocal

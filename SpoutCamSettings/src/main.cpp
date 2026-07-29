@@ -196,12 +196,17 @@ static std::wstring FindFilter()
 	const wchar_t* sub  = L"binaries\\SPOUTCAM\\SpoutCam32\\SpoutCam32.ax";
 #endif
 
-	const std::wstring candidates[] = {
-		dir+name,
-		dir+sub,
-		dir+L"..\\"+sub,
-		dir+L"..\\..\\"+sub
-	};
+	// Next to the program first, for a folder that has simply been copied
+	// somewhere. The rest walk back out of build\<arch> to the repository
+	// layout, where the filter lives in a sibling SpoutCam folder.
+	const std::wstring up[] = { L"", L"..\\", L"..\\..\\", L"..\\..\\..\\", L"..\\..\\..\\..\\" };
+
+	std::vector<std::wstring> candidates;
+	candidates.push_back(dir+name);
+	for (const auto& u : up) {
+		candidates.push_back(dir+u+sub);
+		candidates.push_back(dir+u+L"SpoutCam\\"+sub);
+	}
 
 	for (const auto& path : candidates) {
 		if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
@@ -209,6 +214,7 @@ static std::wstring FindFilter()
 	}
 	return L"";
 }
+
 
 static void RegisterFilter()
 {
@@ -415,9 +421,29 @@ static std::wstring LoadHtmlResource()
 	return Widen(data, (int)size);
 }
 
+//
+// WebView2 keeps a browser profile on disk. Left to itself it puts one beside
+// the executable, which drops a large cache folder into whatever directory the
+// program was run from. Keep it under the user's local app data instead.
+//
+static std::wstring UserDataFolder()
+{
+	wchar_t local[MAX_PATH] = {};
+	if (!GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH))
+		return L""; // let WebView2 fall back to its own default
+
+	std::wstring path = local;
+	path += L"\\SpoutCamSettings";
+	CreateDirectoryW(path.c_str(), nullptr); // fails harmlessly if it exists
+	return path;
+}
+
 static void CreateWebView(HWND hWnd)
 {
-	CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+	const std::wstring userData = UserDataFolder();
+
+	CreateCoreWebView2EnvironmentWithOptions(nullptr,
+		userData.empty() ? nullptr : userData.c_str(), nullptr,
 		Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
 			[hWnd](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
 				if (!env) return S_OK;
