@@ -127,10 +127,19 @@ bool SpoutPreview::GrabFrame()
 		m_bFrameValid = false;
 	}
 
-	// AlphaBlend wants BGRA, so swap when the sender texture is RGBA. The
-	// user's own swap option flips that again, hence the inequality.
+	//
+	// Channel order is handled here rather than by the receiver.
+	//
+	// The panel is far smaller than any sender, so every frame goes through
+	// the resampling path, and that path takes no swap flag at all. Asking the
+	// receiver to swap therefore did nothing, and an RGBA sender came out with
+	// red and blue exchanged: skin tones turned lavender.
+	//
+	// AlphaBlend wants BGRA. The user's own swap option flips that again,
+	// hence the inequality.
 	const bool bNeedsSwap = (m_Receiver.GetSenderFormat() == DXGI_FORMAT_R8G8B8A8_UNORM);
-	m_Receiver.SetSwap(bNeedsSwap != m_bSwap);
+	const bool bSwapChannels = (bNeedsSwap != m_bSwap);
+	m_Receiver.SetSwap(false);
 
 	if (!m_Receiver.ReceiveImage(m_Pixels.data(), (unsigned int)rw, (unsigned int)rh, false, m_bFlip)) {
 		m_bConnected = false;
@@ -170,11 +179,20 @@ bool SpoutPreview::GrabFrame()
 			(unsigned int)rw, (unsigned int)rh, 4, m_Rotate);
 	}
 
-	// Premultiply for AlphaBlend and note whether the sender uses alpha at all
+	// Put the channels in the order the DIB expects, premultiply for
+	// AlphaBlend, and note whether the sender uses alpha at all.
+	// The sender carries straight alpha, so the scaling here is needed.
 	bool bAlpha = false;
 	unsigned char* p = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
 	const size_t count = (size_t)w*h;
 	for (size_t i = 0; i < count; i++, p += 4) {
+
+		if (bSwapChannels) {
+			const unsigned char t = p[0];
+			p[0] = p[2];
+			p[2] = t;
+		}
+
 		const unsigned int a = p[3];
 		if (a != 255) {
 			bAlpha = true;

@@ -644,7 +644,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 	// Small enough to sit beside whatever it is being used to configure
 	const int dpi = GetDpiForSystem();
 	const int w = MulDiv(400, dpi, 96);
-	const int h = MulDiv(578, dpi, 96); // fits the collapsed panel with nothing to spare
+	const int h = MulDiv(548, dpi, 96); // fits the collapsed panel with nothing to spare
 
 	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam Settings",
 		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
