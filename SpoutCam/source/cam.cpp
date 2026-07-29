@@ -782,6 +782,13 @@ void CVCamStream::RefreshLiveSettings()
 {
 	const char *regkey = "Software\\Leading Edge\\SpoutCam";
 
+	// SpoutCamSettings holds this event for as long as it is running. Opening
+	// it by name is a couple of microseconds and only happens about twice a
+	// second, so there is no need for anything longer lived here.
+	HANDLE hRun = OpenEventA(SYNCHRONIZE, FALSE, "SpoutCamSettingsRunning");
+	m_bAppRunning = (hRun != NULL);
+	if (hRun) CloseHandle(hRun);
+
 	DWORD dwMirror = 0, dwSwap = 0, dwFlip = 0;
 	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "mirror", &dwMirror);
 	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "swap", &dwSwap);
@@ -1067,6 +1074,14 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	// Sizes should be OK, but check again
 	unsigned int size = (unsigned int)pms->GetSize();
 	if(size != imagesize) { // imagesize retrieved above
+		ReleaseCamReceiver();
+		goto ShowStatic;
+	}
+
+	// With the settings panel closed the camera is idle. It keeps producing
+	// frames so the host does not report a dead device, but they carry the
+	// name plate rather than the sender.
+	if (!m_bAppRunning) {
 		ReleaseCamReceiver();
 		goto ShowStatic;
 	}

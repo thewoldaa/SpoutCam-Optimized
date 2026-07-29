@@ -78,6 +78,17 @@ still need the camera source removed and added again.
 With no sender running the output was random noise. It now reads "SpoutCam", drawn
 once and copied per frame.
 
+### The camera follows the settings program
+
+SpoutCamSettings holds a named event while it runs, and the filter checks for it.
+Quit the program and the camera goes idle, the same way quitting OBS stops its
+virtual camera. Minimise instead and it drops to the notification area, out of the
+way but still feeding the sender through.
+
+The camera stays present in the host's device list either way. Idle means showing
+the name plate rather than disappearing, since a device that vanishes mid-session
+tends to upset the program using it.
+
 ## SpoutCamSettings
 
 The original settings program was never published in source form, so this is a new
@@ -89,6 +100,8 @@ one. It builds to a single executable with no installer and no runtime DLL to sh
   actually carries alpha. It follows the orientation controls as they are
   edited, so you can see a rotation before committing to it
 - Registers the filter through the elevation prompt
+- Settings are written as they are edited, so there is no Save button and nothing
+  to lose by closing the window. Minimise puts it in the notification area
 
 The interface is HTML in a WebView2 control. Video frames do not go through the
 JavaScript bridge. The preview is a plain child window drawn directly over a slot in

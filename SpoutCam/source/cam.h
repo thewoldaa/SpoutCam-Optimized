@@ -232,6 +232,11 @@ public:
 	unsigned int m_NoSignalWidth;
 	unsigned int m_NoSignalHeight;
 
+	// Whether SpoutCamSettings is running. The camera is only a window onto
+	// that program, the same way OBS owns its virtual camera, so with the
+	// panel closed the filter stays connected but shows the idle frame.
+	bool m_bAppRunning;
+
 	// Quarter turn applied to the output: 0, 90, 180 or 270, clockwise.
 	// 90 and 270 swap the advertised width and height, which is how a
 	// landscape sender becomes a portrait camera.

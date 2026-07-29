@@ -375,10 +375,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 9px var(--pad);
+    padding: 7px var(--pad);
     background: var(--panel);
     border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--faint);
   }
+  /* Flicks to the accent colour on a write so a change is visibly taken */
+  footer #saved.hit { color: var(--tally); }
 
   button.btn {
     font: 11px/1 var(--sans);
@@ -528,9 +534,7 @@
 </main>
 
 <footer>
-  <div class="spacer"></div>
-  <button class="btn" id="cancel">Cancel</button>
-  <button class="btn primary" id="ok">Save</button>
+  <span id="saved">Settings save as you change them</span>
 </footer>
 
 <script>
@@ -544,8 +548,8 @@
     swatches.forEach(s => s.setAttribute('aria-pressed',
       String(!fromPicker && s.dataset.c.toLowerCase() === hex.toLowerCase())));
   }
-  swatches.forEach(s => s.addEventListener('click', () => setColour(s.dataset.c, false)));
-  $('custom').addEventListener('input', e => setColour(e.target.value, true));
+  swatches.forEach(s => s.addEventListener('click', () => { setColour(s.dataset.c, false); save(); }));
+  $('custom').addEventListener('input', e => { setColour(e.target.value, true); save(); });
 
   /* ---- dependent enable states ---- */
   /* ---- rotation ----
@@ -561,6 +565,7 @@
     rotateValue = (rotateValue + 90) % 360;
     showRotate();
     sendOrient();
+    save();
   });
 
   function syncEnabled() {
@@ -603,6 +608,7 @@
     $('prevhead').setAttribute('aria-expanded', String(open));
     $('prevhint').textContent = open ? 'visible' : 'hidden';
     if (!open) reportPreviewRect();                 // hide at once
+    save();                                         // remembered for next time
   }
   $('prevhead').addEventListener('click', () => setPreview(!previewOpen));
   $('preview-slot').addEventListener('transitionend', e => {
@@ -633,7 +639,33 @@
     };
   }
 
+  /* ---- auto save ----
+     Every control writes straight through, so there is nothing to confirm and
+     no way to leave the panel holding values it never stored. Coalesced on a
+     short timer, otherwise dragging the slider would write on every pixel. */
+  let saveTimer = 0, flashTimer = 0, applying = false;
+  function save() {
+    if (applying) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      send(collect());
+      const tag = $('saved');
+      tag.textContent = 'Saved';
+      tag.classList.add('hit');
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        tag.textContent = 'Settings save as you change them';
+        tag.classList.remove('hit');
+      }, 1200);
+    }, 150);
+  }
+
+  // Catches the selects, the text field, the checkboxes and the slider at once
+  document.addEventListener('change', save);
+  document.addEventListener('input', save);
+
   window.applySettings = s => {
+    applying = true;   // filling the controls is not an edit
     $('fps').value = s.fps;
     $('res').value = s.res;
     $('sender').value = s.sender || '';
@@ -651,6 +683,7 @@
     sendOrient();
     // Reopen the preview if it was left open last time
     if (s.preview) setPreview(true);
+    applying = false;
   };
 
   window.setTally = (live, text) => {
@@ -699,14 +732,6 @@
   };
 
   $('caminstall').addEventListener('click', () => send({ type: camAction }));
-
-  $('ok').addEventListener('click', () => send(collect()));
-  $('cancel').addEventListener('click', () => send({ type: 'cancel' }));
-
-  // Called from the host when the window is closing, so shutting the panel
-  // keeps the current values instead of throwing them away. Cancel still
-  // discards, otherwise there would be no way to back out of a change.
-  window.requestSave = () => send(collect());
 
   syncEnabled();
   send({ type: 'ready' });

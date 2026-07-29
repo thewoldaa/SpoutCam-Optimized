@@ -30,11 +30,18 @@ using namespace Microsoft::WRL;
 static const wchar_t* kRegPath = L"Software\\Leading Edge\\SpoutCam";
 static const wchar_t* kWndClass = L"SpoutCamSettingsMain";
 static const UINT_PTR kTimerId = 1;
-static const UINT_PTR kCloseTimerId = 2;
 
-// Closing asks the page for its current values first, so the window cannot be
-// torn down until that round trip finishes or gives up.
-static bool g_bClosing = false;
+// The filter watches for this event and shows its name plate when it is gone,
+// so quitting here stops the camera the way quitting OBS stops its virtual
+// camera. Minimising to the tray keeps it alive without keeping it in the way.
+static const wchar_t* kRunEventName = L"SpoutCamSettingsRunning";
+static HANDLE g_hRunEvent = nullptr;
+
+static const UINT kTrayMsg = WM_APP+1;
+static const UINT kTrayIconId = 1;
+static const UINT kMenuShow = 100;
+static const UINT kMenuExit = 101;
+static NOTIFYICONDATAW g_tray = {};
 
 static HWND  g_hMain = nullptr;
 static ComPtr<ICoreWebView2Controller> g_controller;
@@ -415,11 +422,9 @@ static void HandleMessage(const std::wstring& json)
 		PushCameraStatus();
 	}
 	else if (type == L"save") {
+		// The page sends this whenever a control changes, so there is nothing
+		// to confirm and nothing to lose by closing the window.
 		SaveSettings(json);
-		DestroyWindow(g_hMain);
-	}
-	else if (type == L"cancel") {
-		DestroyWindow(g_hMain);
 	}
 	else if (type == L"register") {
 		RegisterFilter(false);
@@ -571,11 +576,70 @@ static void CreateWebView(HWND hWnd)
 			}).Get());
 }
 
+// ---------------------------------------------------------------- tray
+
+static void AddTrayIcon(HWND hWnd, HINSTANCE hInst)
+{
+	g_tray.cbSize           = sizeof(g_tray);
+	g_tray.hWnd             = hWnd;
+	g_tray.uID              = kTrayIconId;
+	g_tray.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+	g_tray.uCallbackMessage = kTrayMsg;
+	g_tray.hIcon            = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_APPICON));
+	wcscpy_s(g_tray.szTip, L"SpoutCam");
+	Shell_NotifyIconW(NIM_ADD, &g_tray);
+}
+
+static void ShowPanel(HWND hWnd)
+{
+	ShowWindow(hWnd, SW_SHOW);
+	if (IsIconic(hWnd))
+		ShowWindow(hWnd, SW_RESTORE);
+	SetForegroundWindow(hWnd);
+}
+
+static void TrayMenu(HWND hWnd)
+{
+	HMENU menu = CreatePopupMenu();
+	AppendMenuW(menu, MF_STRING, kMenuShow, L"Show settings");
+	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING, kMenuExit, L"Quit (stops the camera)");
+	SetMenuDefaultItem(menu, kMenuShow, FALSE);
+
+	POINT pt;
+	GetCursorPos(&pt);
+	// Required so the menu closes when clicked away from
+	SetForegroundWindow(hWnd);
+	TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, nullptr);
+	DestroyMenu(menu);
+}
+
 // ---------------------------------------------------------------- window
 
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 {
 	switch (msg) {
+
+	case WM_SYSCOMMAND:
+		// Minimise goes to the tray rather than the taskbar. The camera keeps
+		// running, which is the point of leaving the program open at all.
+		if ((wp & 0xFFF0) == SC_MINIMIZE) {
+			ShowWindow(hWnd, SW_HIDE);
+			return 0;
+		}
+		break;
+
+	case kTrayMsg:
+		if (LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_LBUTTONDBLCLK)
+			ShowPanel(hWnd);
+		else if (LOWORD(lp) == WM_RBUTTONUP)
+			TrayMenu(hWnd);
+		return 0;
+
+	case WM_COMMAND:
+		if (LOWORD(wp) == kMenuShow) ShowPanel(hWnd);
+		else if (LOWORD(wp) == kMenuExit) DestroyWindow(hWnd);
+		return 0;
 
 	case WM_SIZE:
 		if (g_controller) {
@@ -586,32 +650,21 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 		return 0;
 
 	case WM_TIMER:
-		if (wp == kTimerId) {
+		// Nothing to draw into while the panel is in the tray
+		if (wp == kTimerId && IsWindowVisible(hWnd)) {
 			g_preview.Tick();
 			UpdateTally();
-		}
-		else if (wp == kCloseTimerId) {
-			// The page never came back with its values
-			KillTimer(hWnd, kCloseTimerId);
-			DestroyWindow(hWnd);
 		}
 		return 0;
 
 	case WM_CLOSE:
-		// Keep whatever is on screen rather than discarding it. The values
-		// live in the page, so they have to be asked for before closing.
-		if (!g_bClosing && g_webview && g_bReadyForScript) {
-			g_bClosing = true;
-			g_webview->ExecuteScript(L"window.requestSave();", nullptr);
-			// If the page cannot answer, close anyway rather than hang
-			SetTimer(hWnd, kCloseTimerId, 1500, nullptr);
-			return 0;
-		}
+		// Settings are already saved as they are edited, so closing means
+		// quitting, and quitting stops the camera.
 		DestroyWindow(hWnd);
 		return 0;
 
 	case WM_DESTROY:
-		KillTimer(hWnd, kCloseTimerId);
+		Shell_NotifyIconW(NIM_DELETE, &g_tray);
 		KillTimer(hWnd, kTimerId);
 		g_preview.Destroy();
 		g_webview.Reset();
@@ -626,6 +679,20 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+	// Held for the lifetime of the program. The filter opens it by name to
+	// decide whether to pass the sender through, and a second copy of this
+	// program would only fight the first over the same window.
+	g_hRunEvent = CreateEventW(nullptr, TRUE, FALSE, kRunEventName);
+	if (g_hRunEvent && GetLastError() == ERROR_ALREADY_EXISTS) {
+		HWND existing = FindWindowW(kWndClass, nullptr);
+		if (existing) {
+			ShowWindow(existing, SW_SHOW);
+			SetForegroundWindow(existing);
+		}
+		CloseHandle(g_hRunEvent);
+		return 0;
+	}
 
 	if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)))
 		return 1;
@@ -644,7 +711,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 	// Small enough to sit beside whatever it is being used to configure
 	const int dpi = GetDpiForSystem();
 	const int w = MulDiv(400, dpi, 96);
-	const int h = MulDiv(548, dpi, 96); // fits the collapsed panel with nothing to spare
+	const int h = MulDiv(534, dpi, 96); // fits the collapsed panel with nothing to spare
 
 	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam Settings",
 		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
@@ -656,6 +723,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 		return 1;
 	}
 
+	AddTrayIcon(g_hMain, hInst);
 	g_preview.Create(g_hMain, hInst);
 	CreateWebView(g_hMain);
 
@@ -669,5 +737,6 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 	}
 
 	CoUninitialize();
+	if (g_hRunEvent) CloseHandle(g_hRunEvent);
 	return 0;
 }
