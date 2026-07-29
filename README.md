@@ -59,6 +59,20 @@ the second texture's benefit.
 `DecideBufferSize` asked for a single buffer, which made every frame wait for the
 downstream filter to release the previous one.
 
+### Rotation
+
+The output can be turned by a quarter, a half or three quarters. A quarter turn
+swaps the advertised width and height, which is how a landscape sender becomes a
+portrait camera for a vertical stream.
+
+### Orientation changes apply while running
+
+Mirror, flip, swap and the key colour are re-read about once a second, so
+changing them in the settings program takes effect without the host having to
+disconnect and reconnect the camera. Frame rate, resolution and rotation all
+change the media type, and DirectShow fixes that when the pins connect, so those
+still need the camera source removed and added again.
+
 ### No more static
 
 With no sender running the output was random noise. It now reads "SpoutCam", drawn
@@ -69,10 +83,11 @@ once and copied per frame.
 The original settings program was never published in source form, so this is a new
 one. It builds to a single executable with no installer and no runtime DLL to ship.
 
-- Frame rate, resolution, sender lock, mirror / flip / swap
+- Frame rate, resolution, sender lock, mirror / flip / swap, rotation
 - Key colour: on/off, preset or custom colour, hard edge, edge threshold
 - Live preview over a checkerboard, so you can see at a glance whether a sender
-  actually carries alpha
+  actually carries alpha. It follows the orientation controls as they are
+  edited, so you can see a rotation before committing to it
 - Registers the filter through the elevation prompt
 
 The interface is HTML in a WebView2 control. Video frames do not go through the

@@ -614,6 +614,62 @@ void spoutCopy::bgra2rgba(const void *bgra_source, void *rgba_dest, unsigned int
 // Function: rgba2rgb
 // Copy RGBA to RGB or BGR allowing for source line pitch using the fastest method
 //
+//---------------------------------------------------------
+// Function: RotateBuffer
+//
+void spoutCopy::RotateBuffer(const void* source, void* dest,
+	unsigned int sourceWidth, unsigned int sourceHeight,
+	unsigned int bytesPerPixel, unsigned int degrees) const
+{
+	if (!source || !dest) return;
+	if (sourceWidth == 0 || sourceHeight == 0 || bytesPerPixel == 0) return;
+
+	const unsigned char* src = (const unsigned char*)source;
+	unsigned char* dst = (unsigned char*)dest;
+
+	const size_t bpp = bytesPerPixel;
+	const size_t srcPitch = (size_t)sourceWidth*bpp;
+
+	if (degrees == 90) {
+		// Destination is sourceHeight wide. Source column 0 becomes the last
+		// destination row, so the image turns clockwise.
+		const size_t dstPitch = (size_t)sourceHeight*bpp;
+		for (unsigned int y = 0; y < sourceHeight; y++) {
+			const unsigned char* srow = src+(size_t)y*srcPitch;
+			for (unsigned int x = 0; x < sourceWidth; x++) {
+				unsigned char* d = dst+(size_t)x*dstPitch+(size_t)(sourceHeight-1-y)*bpp;
+				memcpy(d, srow+(size_t)x*bpp, bpp);
+			}
+		}
+		return;
+	}
+
+	if (degrees == 270) {
+		const size_t dstPitch = (size_t)sourceHeight*bpp;
+		for (unsigned int y = 0; y < sourceHeight; y++) {
+			const unsigned char* srow = src+(size_t)y*srcPitch;
+			for (unsigned int x = 0; x < sourceWidth; x++) {
+				unsigned char* d = dst+(size_t)(sourceWidth-1-x)*dstPitch+(size_t)y*bpp;
+				memcpy(d, srow+(size_t)x*bpp, bpp);
+			}
+		}
+		return;
+	}
+
+	if (degrees == 180) {
+		for (unsigned int y = 0; y < sourceHeight; y++) {
+			const unsigned char* srow = src+(size_t)y*srcPitch;
+			unsigned char* drow = dst+(size_t)(sourceHeight-1-y)*srcPitch;
+			for (unsigned int x = 0; x < sourceWidth; x++)
+				memcpy(drow+(size_t)(sourceWidth-1-x)*bpp, srow+(size_t)x*bpp, bpp);
+		}
+		return;
+	}
+
+	// 0 degrees, or a value that is not a quarter turn
+	memcpy(dst, src, srcPitch*sourceHeight);
+}
+
 //
 // Composite one source pixel over the key colour.
 // Components stay in source order - the caller maps them to the destination.

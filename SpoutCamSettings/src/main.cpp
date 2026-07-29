@@ -272,13 +272,14 @@ static void PushSettingsToPage()
 	wchar_t buf[1024];
 	swprintf_s(buf,
 		L"window.applySettings({fps:%u,res:%u,sender:\"%s\",mirror:%u,flip:%u,"
-		L"swap:%u,keyon:%u,keyrgb:%u,hard:%u,thr:%u,preview:%u});",
+		L"swap:%u,rotate:%u,keyon:%u,keyrgb:%u,hard:%u,thr:%u,preview:%u});",
 		ReadDword(L"fps", 3),
 		ReadDword(L"resolution", 0),
 		JsonEscape(ReadString(L"senderstart")).c_str(),
 		ReadDword(L"mirror", 0),
 		ReadDword(L"flip", 0),
 		ReadDword(L"swap", 0),
+		ReadDword(L"rotate", 0),
 		ReadDword(L"keycolour", 0),
 		ReadDword(L"keyrgb", 0x0000FF00),
 		ReadDword(L"keyhardedge", 0),
@@ -295,6 +296,7 @@ static void SaveSettings(const std::wstring& json)
 	WriteDword(L"mirror",     (DWORD)JsonInt(json, L"mirror", 0));
 	WriteDword(L"flip",       (DWORD)JsonInt(json, L"flip", 0));
 	WriteDword(L"swap",       (DWORD)JsonInt(json, L"swap", 0));
+	WriteDword(L"rotate",     (DWORD)JsonInt(json, L"rotate", 0));
 
 	WriteDword(L"keycolour",    (DWORD)JsonInt(json, L"keyon", 0));
 	WriteDword(L"keyrgb",       (DWORD)JsonInt(json, L"keyrgb", 0x0000FF00));
@@ -350,6 +352,13 @@ static void HandleMessage(const std::wstring& json)
 	}
 	else if (type == L"register") {
 		RegisterFilter();
+	}
+	else if (type == L"orient") {
+		g_preview.SetOrientation(
+			JsonInt(json, L"mirror", 0) != 0,
+			JsonInt(json, L"flip", 0) != 0,
+			JsonInt(json, L"swap", 0) != 0,
+			(unsigned int)JsonInt(json, L"rotate", 0));
 	}
 	else if (type == L"preview") {
 		// Grow the window to make room rather than letting the panel scroll.
@@ -561,7 +570,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 	// Small enough to sit beside whatever it is being used to configure
 	const int dpi = GetDpiForSystem();
 	const int w = MulDiv(400, dpi, 96);
-	const int h = MulDiv(486, dpi, 96); // fits the collapsed panel with nothing to spare
+	const int h = MulDiv(522, dpi, 96); // fits the collapsed panel with nothing to spare
 
 	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam Settings",
 		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,

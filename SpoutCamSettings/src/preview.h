@@ -33,6 +33,10 @@ public:
 	// Receive one frame and repaint. Cheap no-op while hidden.
 	void Tick();
 
+	// Follow the orientation controls as they are edited, so the preview
+	// shows what is being set rather than what was last saved.
+	void SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned int rotate);
+
 	bool IsVisible()   const { return m_bShow; }
 	bool IsConnected() const { return m_bConnected; }
 	bool HasAlpha()    const { return m_bHasAlpha; }
@@ -66,4 +70,14 @@ private:
 	int m_PixWidth  = 0;
 	int m_PixHeight = 0;
 	bool m_bFrameValid = false;
+
+	// Scratch for the turned frame. A rotation cannot be done in place.
+	std::vector<unsigned char> m_Rotated;
+
+	bool m_bMirror = false;
+	bool m_bFlip   = false;
+	bool m_bSwap   = false;
+	unsigned int m_Rotate = 0;
+
+	spoutCopy m_Copy;
 };

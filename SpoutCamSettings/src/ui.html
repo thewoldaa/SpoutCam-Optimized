@@ -300,6 +300,14 @@
   /* disabled group */
   .group[data-on="0"] { opacity: .38; pointer-events: none; }
 
+  .note {
+    flex: 1;
+    color: var(--faint);
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 6px 0;
+  }
+
   /* ---------------- preview ---------------- */
 
   .preview-head {
@@ -439,6 +447,21 @@
     </div>
   </div>
 
+  <div class="row">
+    <label for="rotate">Rotate</label>
+    <select id="rotate">
+      <option value="0">None</option>
+      <option value="90">90&deg; right</option>
+      <option value="180">180&deg;</option>
+      <option value="270">90&deg; left</option>
+    </select>
+  </div>
+
+  <div class="row" id="rotnote" style="display:none">
+    <label class="note">A quarter turn swaps the camera width and height.
+      Remove and re-add the camera in the receiving program to pick it up.</label>
+  </div>
+
   <div class="legend">Transparency</div>
 
   <div class="row">
@@ -508,9 +531,25 @@
   function syncEnabled() {
     $('keygroup').dataset.on = $('keyon').checked ? '1' : '0';
     $('thrrow').style.display = $('hard').checked ? '' : 'none';
+    $('rotnote').style.display = $('rotate').value === '0' ? 'none' : '';
   }
   $('keyon').addEventListener('change', syncEnabled);
   $('hard').addEventListener('change', syncEnabled);
+  $('rotate').addEventListener('change', syncEnabled);
+
+  // The preview is drawn by the host, so it has to be told about orientation
+  // as it is edited. Otherwise it would keep showing the last saved state.
+  function sendOrient() {
+    send({
+      type: 'orient',
+      mirror: $('mirror').checked ? 1 : 0,
+      flip: $('flip').checked ? 1 : 0,
+      swap: $('swap').checked ? 1 : 0,
+      rotate: +$('rotate').value
+    });
+  }
+  ['mirror', 'flip', 'swap', 'rotate'].forEach(
+    id => $(id).addEventListener('change', sendOrient));
   $('thr').addEventListener('input', e => $('throut').textContent = e.target.value);
 
   /* ---- preview show / hide ----
@@ -552,6 +591,7 @@
       mirror: $('mirror').checked ? 1 : 0,
       flip: $('flip').checked ? 1 : 0,
       swap: $('swap').checked ? 1 : 0,
+      rotate: +$('rotate').value,
       keyon: $('keyon').checked ? 1 : 0,
       keyrgb: parseInt(hex.slice(1), 16),
       hard: $('hard').checked ? 1 : 0,
@@ -567,12 +607,14 @@
     $('mirror').checked = !!s.mirror;
     $('flip').checked = !!s.flip;
     $('swap').checked = !!s.swap;
+    $('rotate').value = s.rotate;
     $('keyon').checked = !!s.keyon;
     $('hard').checked = !!s.hard;
     $('thr').value = s.thr;
     $('throut').textContent = s.thr;
     setColour('#' + (s.keyrgb >>> 0).toString(16).padStart(6, '0'), false);
     syncEnabled();
+    sendOrient();
     // Reopen the preview if it was left open last time
     if (s.preview) setPreview(true);
   };

@@ -589,6 +589,7 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	g_Height		= 720;
 	m_NoSignalWidth  = 0;    // "no signal" frame is built on first use
 	m_NoSignalHeight = 0;
+	m_Rotate         = 0;    // replaced by the registry value below
 	g_SenderName[0] = 0;
 	g_ActiveSender[0] = 0;
 	g_SenderStart[0] = 0;
@@ -667,33 +668,13 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	g_SenderStart[0] = 0;
 	ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderstart", g_SenderStart);
 
-	//
-	// Key colour
-	//
-	// A webcam feed has no alpha channel, so a sender that produces
-	// transparency would normally lose it. Compositing over a solid colour
-	// keeps the matte in a form that a chroma key can remove downstream.
-	// Off by default - senders without alpha are unaffected either way.
-	//
-	DWORD dwKeyColour = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "keycolour", &dwKeyColour);
+	// Rotation has to be known before SetResolution runs, because a quarter
+	// turn swaps the width and height the filter advertises
+	ReadRotationSetting();
 
-	DWORD dwKeyRGB = 0x0000FF00; // pure green
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "keyrgb", &dwKeyRGB);
-
-	DWORD dwKeyHardEdge = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "keyhardedge", &dwKeyHardEdge);
-
-	DWORD dwKeyThreshold = 128;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "keythreshold", &dwKeyThreshold);
-	if (dwKeyThreshold > 255) dwKeyThreshold = 255;
-
-	receiver.SetKeyColour(dwKeyColour > 0,
-		(unsigned char)((dwKeyRGB >> 16) & 0xFF),
-		(unsigned char)((dwKeyRGB >> 8) & 0xFF),
-		(unsigned char)(dwKeyRGB & 0xFF),
-		dwKeyHardEdge > 0,
-		(unsigned char)dwKeyThreshold);
+	// Orientation and key colour. These are re-read while running, so the
+	// same function does the first read.
+	RefreshLiveSettings();
 
 	/*
 	printf("dwFps        = %d\n", dwFps);
@@ -763,6 +744,81 @@ void CVCamStream::SetFps(DWORD dwFps)
 // A sender that changes size mid-stream is still resampled - the allocator is
 // fixed once the pins connect, so the consumer has to reconnect to follow it.
 //
+//
+// Read the quarter turn applied to the output.
+//
+// Kept separate from the rest because it has to be known before the frame
+// size is worked out, and unlike the other options it cannot be changed while
+// running: 90 and 270 swap width and height, and the format is fixed once the
+// pins connect.
+//
+void CVCamStream::ReadRotationSetting()
+{
+	DWORD dwRotate = 0;
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "rotate", &dwRotate);
+
+	switch (dwRotate) {
+		case 90:
+		case 180:
+		case 270:
+			m_Rotate = (unsigned int)dwRotate;
+			break;
+		default:
+			m_Rotate = 0; // anything else is not a quarter turn
+			break;
+	}
+}
+
+//
+// Re-read the options that can be changed without renegotiating the format.
+//
+// Mirror, flip, swap and the key colour only affect how pixels are copied, so
+// picking them up while running means the settings program can change them
+// without the host having to disconnect and reconnect the camera. Frame rate,
+// resolution and rotation all change the media type, so they still need a
+// reconnect.
+//
+void CVCamStream::RefreshLiveSettings()
+{
+	const char *regkey = "Software\\Leading Edge\\SpoutCam";
+
+	DWORD dwMirror = 0, dwSwap = 0, dwFlip = 0;
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "mirror", &dwMirror);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "swap", &dwSwap);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "flip", &dwFlip);
+
+	receiver.SetMirror(dwMirror > 0);
+	receiver.SetSwap(dwSwap > 0);
+
+	// Flip is on by default because a windows bitmap is stored bottom up
+	bInvert = !(dwFlip > 0);
+
+	//
+	// Key colour
+	//
+	// A webcam feed has no alpha channel, so a sender that produces
+	// transparency would normally lose it. Compositing over a solid colour
+	// keeps the matte in a form that a chroma key can remove downstream.
+	// Off by default - senders without alpha are unaffected either way.
+	//
+	DWORD dwKeyColour = 0, dwKeyHardEdge = 0;
+	DWORD dwKeyRGB = 0x0000FF00;  // pure green
+	DWORD dwKeyThreshold = 128;
+
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "keycolour", &dwKeyColour);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "keyrgb", &dwKeyRGB);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "keyhardedge", &dwKeyHardEdge);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, regkey, "keythreshold", &dwKeyThreshold);
+	if (dwKeyThreshold > 255) dwKeyThreshold = 255;
+
+	receiver.SetKeyColour(dwKeyColour > 0,
+		(unsigned char)((dwKeyRGB >> 16) & 0xFF),
+		(unsigned char)((dwKeyRGB >> 8) & 0xFF),
+		(unsigned char)(dwKeyRGB & 0xFF),
+		dwKeyHardEdge > 0,
+		(unsigned char)dwKeyThreshold);
+}
+
 void CVCamStream::RefreshSenderResolution()
 {
 	// Only when the user asked to follow the active sender
@@ -847,6 +903,21 @@ void CVCamStream::SetResolution(DWORD dwResolution)
 			g_Height = 480;
 			break;
 	}
+
+	// A quarter turn swaps what the filter advertises, which is how a
+	// landscape sender ends up as a portrait camera.
+	if (m_Rotate == 90 || m_Rotate == 270) {
+		const unsigned int swap = g_Width;
+		g_Width = g_Height;
+		g_Height = swap;
+	}
+
+	// RGB24 rows are padded to a DWORD. Keeping the width a multiple of 4
+	// makes the row length a multiple of 4 as well, so the sample buffer has
+	// no padding and the rotation below can treat it as tightly packed.
+	g_Width = (g_Width/4)*4;
+	if (g_Width == 0)
+		g_Width = 4;
 }
 
 CVCamStream::~CVCamStream()
@@ -906,6 +977,12 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	if (bMemoryMode) {
 		return S_FALSE;
 	}
+
+	// Pick up option changes so the settings program takes effect without the
+	// host reconnecting. About once a second - these are registry reads, and
+	// nobody changes a checkbox sixty times a second.
+	if ((NumFrames % 60) == 0)
+		RefreshLiveSettings();
 
 	//
 	// Timing - modified from Red5 method
@@ -1027,7 +1104,31 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	// ReceiveImage handles sender detection, connection and copy of pixels
 	// bRGB    : set true for the BGR pixel data (i.e. not RGBA/BGRA)
 	// bInvert : SpoutCamSettings or properites dialog user setting "flip"
-	if (receiver.ReceiveImage(pData, g_Width, g_Height, true, bInvert)) {
+	//
+	// A rotated frame cannot be written over the one being read, so it goes
+	// via a scratch buffer. For a quarter turn the sender is received at the
+	// swapped size and turned into the sample afterwards.
+	//
+	unsigned char *dest = pData;
+	unsigned int recvWidth  = width;
+	unsigned int recvHeight = height;
+
+	if (m_Rotate != 0) {
+		if (m_Rotate == 90 || m_Rotate == 270) {
+			recvWidth  = height;
+			recvHeight = width;
+		}
+		const size_t needed = (size_t)recvWidth*recvHeight*3;
+		if (m_RotateBuffer.size() != needed)
+			m_RotateBuffer.assign(needed, 0);
+		dest = m_RotateBuffer.data();
+	}
+
+	if (receiver.ReceiveImage(dest, recvWidth, recvHeight, true, bInvert)) {
+
+		if (m_Rotate != 0)
+			m_Copy.RotateBuffer(m_RotateBuffer.data(), pData, recvWidth, recvHeight, 3, m_Rotate);
+
 		if (receiver.IsUpdated()) {
 			// The sender has changed
 			if (strcmp(g_SenderName, receiver.GetSenderName()) != 0) {

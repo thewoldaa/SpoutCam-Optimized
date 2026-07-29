@@ -75,6 +75,19 @@ void SpoutPreview::SetRect(int x, int y, int w, int h, bool bShow)
 	SetWindowPos(m_hWnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
 }
 
+void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned int rotate)
+{
+	m_bMirror = bMirror;
+	m_bFlip   = bFlip;
+	m_bSwap   = bSwap;
+	m_Rotate  = (rotate == 90 || rotate == 180 || rotate == 270) ? rotate : 0;
+
+	// Force the next frame to resize, since a quarter turn changes the shape
+	m_bFrameValid = false;
+	m_PixWidth = 0;
+	m_PixHeight = 0;
+}
+
 bool SpoutPreview::GrabFrame()
 {
 	if (!m_bDXtried) {
@@ -84,9 +97,16 @@ bool SpoutPreview::GrabFrame()
 	if (!m_bDXok)
 		return false;
 
-	// Fit the sender inside the panel, keeping its shape
+	const bool bQuarter = (m_Rotate == 90 || m_Rotate == 270);
+
+	// Fit the sender inside the panel, keeping its shape. A quarter turn
+	// swaps what the viewer ends up seeing, so fit the turned shape.
 	unsigned int sw = m_Receiver.GetSenderWidth();
 	unsigned int sh = m_Receiver.GetSenderHeight();
+	if (bQuarter) {
+		const unsigned int t = sw; sw = sh; sh = t;
+	}
+
 	int w = m_Width;
 	int h = m_Height;
 	if (sw > 0 && sh > 0) {
@@ -95,17 +115,24 @@ bool SpoutPreview::GrabFrame()
 		h = max(1, (int)(sh*scale));
 	}
 
-	if ((int)m_Pixels.size() != w*h*4 || w != m_PixWidth || h != m_PixHeight) {
-		m_Pixels.assign((size_t)w*h*4, 0);
+	// Size received before the turn is applied
+	const int rw = bQuarter ? h : w;
+	const int rh = bQuarter ? w : h;
+
+	if (w != m_PixWidth || h != m_PixHeight) {
+		m_Pixels.assign((size_t)rw*rh*4, 0);
+		m_Rotated.assign((size_t)w*h*4, 0);
 		m_PixWidth = w;
 		m_PixHeight = h;
 		m_bFrameValid = false;
 	}
 
-	// AlphaBlend wants BGRA, so swap only when the sender texture is RGBA
-	m_Receiver.SetSwap(m_Receiver.GetSenderFormat() == DXGI_FORMAT_R8G8B8A8_UNORM);
+	// AlphaBlend wants BGRA, so swap when the sender texture is RGBA. The
+	// user's own swap option flips that again, hence the inequality.
+	const bool bNeedsSwap = (m_Receiver.GetSenderFormat() == DXGI_FORMAT_R8G8B8A8_UNORM);
+	m_Receiver.SetSwap(bNeedsSwap != m_bSwap);
 
-	if (!m_Receiver.ReceiveImage(m_Pixels.data(), (unsigned int)w, (unsigned int)h, false, false)) {
+	if (!m_Receiver.ReceiveImage(m_Pixels.data(), (unsigned int)rw, (unsigned int)rh, false, m_bFlip)) {
 		m_bConnected = false;
 		m_bFrameValid = false;
 		m_SenderName[0] = 0;
@@ -123,9 +150,29 @@ bool SpoutPreview::GrabFrame()
 		return false;
 	}
 
+	// Mirror in the received frame's own space, before any turn, so the two
+	// options combine the same way the filter combines them
+	if (m_bMirror) {
+		for (int y = 0; y < rh; y++) {
+			unsigned char* row = m_Pixels.data()+(size_t)y*rw*4;
+			for (int x = 0; x < rw/2; x++) {
+				unsigned char* a = row+(size_t)x*4;
+				unsigned char* b = row+(size_t)(rw-1-x)*4;
+				for (int c = 0; c < 4; c++) {
+					const unsigned char t = a[c]; a[c] = b[c]; b[c] = t;
+				}
+			}
+		}
+	}
+
+	if (m_Rotate != 0) {
+		m_Copy.RotateBuffer(m_Pixels.data(), m_Rotated.data(),
+			(unsigned int)rw, (unsigned int)rh, 4, m_Rotate);
+	}
+
 	// Premultiply for AlphaBlend and note whether the sender uses alpha at all
 	bool bAlpha = false;
-	unsigned char* p = m_Pixels.data();
+	unsigned char* p = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
 	const size_t count = (size_t)w*h;
 	for (size_t i = 0; i < count; i++, p += 4) {
 		const unsigned int a = p[3];
@@ -208,11 +255,14 @@ void SpoutPreview::Paint(HDC hdc)
 		bmi.bmiHeader.biBitCount    = 32;
 		bmi.bmiHeader.biCompression = BI_RGB;
 
+		const unsigned char* display = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
+		const size_t displaySize = (size_t)m_PixWidth*m_PixHeight*4;
+
 		HDC     src    = CreateCompatibleDC(mem);
 		void*   bits   = nullptr;
 		HBITMAP srcbmp = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
 		if (srcbmp && bits) {
-			memcpy(bits, m_Pixels.data(), m_Pixels.size());
+			memcpy(bits, display, displaySize);
 			HGDIOBJ oldsrc = SelectObject(src, srcbmp);
 
 			BLENDFUNCTION bf = {};
