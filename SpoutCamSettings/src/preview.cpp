@@ -88,6 +88,35 @@ void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned
 	m_PixHeight = 0;
 }
 
+bool SpoutPreview::ProbeSender(unsigned int& width, unsigned int& height)
+{
+	char name[256] = {};
+	if (!m_Receiver.GetActiveSender(name) || !name[0])
+		return false;
+
+	HANDLE handle = nullptr;
+	DWORD  format = 0;
+	unsigned int w = 0, h = 0;
+	if (!m_Receiver.GetSenderInfo(name, w, h, handle, format) || w == 0 || h == 0)
+		return false;
+
+	strcpy_s(m_SenderName, sizeof(m_SenderName), name);
+	width  = w;
+	height = h;
+	return true;
+}
+
+void SpoutPreview::SetKey(bool bOn, unsigned char r, unsigned char g, unsigned char b,
+	bool bHardEdge, unsigned char threshold)
+{
+	m_bKey          = bOn;
+	m_KeyR          = r;
+	m_KeyG          = g;
+	m_KeyB          = b;
+	m_bKeyHardEdge  = bHardEdge;
+	m_KeyThreshold  = threshold;
+}
+
 bool SpoutPreview::GrabFrame()
 {
 	if (!m_bDXtried) {
@@ -179,6 +208,14 @@ bool SpoutPreview::GrabFrame()
 			(unsigned int)rw, (unsigned int)rh, 4, m_Rotate);
 	}
 
+	// Composite over the key colour first, in the channel order the pixels
+	// arrived in, so the swap below carries the key with the image exactly as
+	// the filter does it. The key is written positionally for the sender's
+	// layout, the same swizzle spoutDX applies.
+	const unsigned char key0 = bNeedsSwap ? m_KeyR : m_KeyB;
+	const unsigned char key1 = m_KeyG;
+	const unsigned char key2 = bNeedsSwap ? m_KeyB : m_KeyR;
+
 	// Put the channels in the order the DIB expects, premultiply for
 	// AlphaBlend, and note whether the sender uses alpha at all.
 	// The sender carries straight alpha, so the scaling here is needed.
@@ -186,6 +223,28 @@ bool SpoutPreview::GrabFrame()
 	unsigned char* p = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
 	const size_t count = (size_t)w*h;
 	for (size_t i = 0; i < count; i++, p += 4) {
+
+		if (m_bKey) {
+			const unsigned int a = p[3];
+			if (a != 255)
+				bAlpha = true;
+
+			if (m_bKeyHardEdge) {
+				if (a < m_KeyThreshold) { p[0] = key0; p[1] = key1; p[2] = key2; }
+			}
+			else if (a == 0) {
+				p[0] = key0; p[1] = key1; p[2] = key2;
+			}
+			else if (a != 255) {
+				const unsigned int ia = 255-a;
+				p[0] = (unsigned char)((p[0]*a + key0*ia)/255);
+				p[1] = (unsigned char)((p[1]*a + key1*ia)/255);
+				p[2] = (unsigned char)((p[2]*a + key2*ia)/255);
+			}
+			// Flattened, so nothing shows through to the checkerboard - which
+			// is the point, since that is what the camera will send
+			p[3] = 255;
+		}
 
 		if (bSwapChannels) {
 			const unsigned char t = p[0];

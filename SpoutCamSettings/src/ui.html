@@ -575,20 +575,30 @@
   $('keyon').addEventListener('change', syncEnabled);
   $('hard').addEventListener('change', syncEnabled);
 
-  // The preview is drawn by the host, so it has to be told about orientation
-  // as it is edited. Otherwise it would keep showing the last saved state.
+  // The preview is drawn by the host, so it has to be told about anything that
+  // changes the picture as it is edited. Otherwise it would keep showing the
+  // last saved state, and the key colour would never appear there at all.
   function sendOrient() {
     send({
       type: 'orient',
       mirror: $('mirror').checked ? 1 : 0,
       flip: $('flip').checked ? 1 : 0,
       swap: $('swap').checked ? 1 : 0,
-      rotate: rotateValue
+      rotate: rotateValue,
+      keyon: $('keyon').checked ? 1 : 0,
+      keyrgb: parseInt($('custom').value.slice(1), 16),
+      hard: $('hard').checked ? 1 : 0,
+      thr: +$('thr').value
     });
   }
-  ['mirror', 'flip', 'swap'].forEach(
+  ['mirror', 'flip', 'swap', 'keyon', 'hard', 'thr', 'custom'].forEach(
     id => $(id).addEventListener('change', sendOrient));
-  $('thr').addEventListener('input', e => $('throut').textContent = e.target.value);
+  $('thr').addEventListener('input', e => {
+    $('throut').textContent = e.target.value;
+    sendOrient();
+  });
+  $('custom').addEventListener('input', sendOrient);
+  swatches.forEach(s => s.addEventListener('click', sendOrient));
 
   /* ---- preview show / hide ----
      The native window is only moved when the slot has a real size, so the

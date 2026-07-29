@@ -5,6 +5,10 @@
 // needs no temporary files and no local web server.
 IDR_UI_HTML RCDATA "ui.html"
 
+// Title bar, taskbar and notification area. Lowest id wins as the program's
+// icon in Explorer, so this stays first among icons.
+IDI_APPICON ICON "app.ico"
+
 // Version details. Worth filling in properly - an unsigned binary with blank
 // publisher fields is the shape SmartScreen and antivirus heuristics like
 // least, and this costs nothing.

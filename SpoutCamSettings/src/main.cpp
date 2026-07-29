@@ -13,6 +13,7 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <wrl.h>
 #include <string>
 #include <vector>
@@ -188,27 +189,26 @@ static std::wstring JsonEscape(const std::wstring& in)
 // it is handed to regsvr32 through the elevation prompt rather than attempted
 // in process.
 //
-static std::wstring FindFilter()
+static std::wstring FindFilterFor(int bits)
 {
 	wchar_t exe[MAX_PATH] = {};
 	GetModuleFileNameW(nullptr, exe, MAX_PATH);
 	std::wstring dir = exe;
 	dir.resize(dir.find_last_of(L'\\')+1);
 
-#ifdef _WIN64
-	const wchar_t* name = L"SpoutCam64.ax";
-	const wchar_t* sub  = L"binaries\\SPOUTCAM\\SpoutCam64\\SpoutCam64.ax";
-#else
-	const wchar_t* name = L"SpoutCam32.ax";
-	const wchar_t* sub  = L"binaries\\SPOUTCAM\\SpoutCam32\\SpoutCam32.ax";
-#endif
+	const wchar_t* name = bits == 64 ? L"SpoutCam64.ax" : L"SpoutCam32.ax";
+	const wchar_t* sub  = bits == 64
+		? L"binaries\\SPOUTCAM\\SpoutCam64\\SpoutCam64.ax"
+		: L"binaries\\SPOUTCAM\\SpoutCam32\\SpoutCam32.ax";
 
 	// Next to the program first, for a folder that has simply been copied
-	// somewhere. The rest walk back out of build\<arch> to the repository
-	// layout, where the filter lives in a sibling SpoutCam folder.
+	// somewhere, then the flat layout an install produces. The rest walk back
+	// out of build\<arch> to the repository layout, where the filter lives in a
+	// sibling SpoutCam folder.
 	const std::wstring up[] = { L"", L"..\\", L"..\\..\\", L"..\\..\\..\\", L"..\\..\\..\\..\\" };
 
 	std::vector<std::wstring> candidates;
+	candidates.push_back(dir+L"filter\\"+name);
 	candidates.push_back(dir+name);
 	for (const auto& u : up) {
 		candidates.push_back(dir+u+sub);
@@ -220,6 +220,16 @@ static std::wstring FindFilter()
 			return path;
 	}
 	return L"";
+}
+
+// The filter matching this build, which is the one that has to be present
+static std::wstring FindFilter()
+{
+#ifdef _WIN64
+	return FindFilterFor(64);
+#else
+	return FindFilterFor(32);
+#endif
 }
 
 
@@ -276,65 +286,326 @@ static void PushCameraStatus()
 	g_webview->ExecuteScript(script.c_str(), nullptr);
 }
 
-static void RegisterFilter(bool bUnregister)
+// ---------------------------------------------------------------- installer
+//
+// The program installs itself rather than shipping a separate installer.
+// Everything here runs in a second, elevated copy of this same executable,
+// started with /install or /uninstall, so nothing the user sees is a console
+// window. A DirectShow filter has to be registered machine wide, which is
+// where the one elevation prompt comes from.
+//
+
+static const wchar_t* kUninstallKey =
+	L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SpoutCam";
+
+static std::wstring SelfPath()
 {
-	const std::wstring filter = bUnregister ? RegisteredFilterPath() : FindFilter();
-	if (filter.empty()) {
-		MessageBoxW(g_hMain,
-			bUnregister
-				? L"Nothing is registered, so there is nothing to remove."
-				: L"Could not find the SpoutCam filter.\n\n"
-				  L"SpoutCam64.ax should sit in SpoutCam\\binaries\\SPOUTCAM\\"
-				  L"SpoutCam64 next to this program.",
-			L"SpoutCam Settings", MB_OK | MB_ICONWARNING);
+	wchar_t buf[MAX_PATH] = {};
+	GetModuleFileNameW(nullptr, buf, MAX_PATH);
+	return buf;
+}
+
+static std::wstring EnvPath(const wchar_t* name)
+{
+	wchar_t buf[MAX_PATH] = {};
+	GetEnvironmentVariableW(name, buf, MAX_PATH);
+	return buf;
+}
+
+static std::wstring InstallDir()
+{
+	// ProgramW6432 is the 64 bit folder even when a 32 bit build reads it,
+	// which keeps both builds installing to the same place
+	std::wstring root = EnvPath(L"ProgramW6432");
+	if (root.empty()) root = EnvPath(L"ProgramFiles");
+	if (root.empty()) root = L"C:\\Program Files";
+	return root + L"\\SpoutCam";
+}
+
+static std::wstring ShortcutPath()
+{
+	std::wstring data = EnvPath(L"ProgramData");
+	if (data.empty()) data = L"C:\\ProgramData";
+	return data + L"\\Microsoft\\Windows\\Start Menu\\Programs\\SpoutCam Settings.lnk";
+}
+
+static bool IsInstalledCopy()
+{
+	const std::wstring self = SelfPath();
+	const std::wstring dest = InstallDir() + L"\\SpoutCamSettings.exe";
+	return _wcsicmp(self.c_str(), dest.c_str()) == 0;
+}
+
+//
+// Run a command with no window at all. ShellExecute with SW_HIDE still lets
+// a console flash on some machines, CREATE_NO_WINDOW does not.
+//
+static bool RunHidden(const std::wstring& cmdline, DWORD waitMs = 30000)
+{
+	std::wstring buf = cmdline; // CreateProcess writes to this
+	STARTUPINFOW si = {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+	PROCESS_INFORMATION pi = {};
+
+	if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE,
+			CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+		return false;
+
+	WaitForSingleObject(pi.hProcess, waitMs);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	return code == 0;
+}
+
+// Same, but without waiting. Used when the thing being started is waiting for
+// this process to exit.
+static bool RunDetached(const std::wstring& cmdline)
+{
+	std::wstring buf = cmdline;
+	STARTUPINFOW si = {};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+	PROCESS_INFORMATION pi = {};
+
+	if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE,
+			CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi))
+		return false;
+
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	return true;
+}
+
+static bool Regsvr(const std::wstring& ax, bool bUnregister, bool b32)
+{
+	// A 64 bit regsvr32 cannot load a 32 bit filter, so the WOW64 copy
+	// registers that one
+	std::wstring exe = EnvPath(L"SystemRoot");
+	if (exe.empty()) exe = L"C:\\Windows";
+	exe += b32 ? L"\\SysWOW64\\regsvr32.exe" : L"\\System32\\regsvr32.exe";
+
+	if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES)
+		exe = L"regsvr32.exe"; // let the search path find it
+
+	std::wstring cmd = L"\"" + exe + L"\" /s ";
+	if (bUnregister) cmd += L"/u ";
+	cmd += L"\"" + ax + L"\"";
+	return RunHidden(cmd);
+}
+
+static bool MakeShortcut(const std::wstring& link, const std::wstring& target)
+{
+	IShellLinkW* sl = nullptr;
+	if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+			IID_IShellLinkW, (void**)&sl)) || !sl)
+		return false;
+
+	sl->SetPath(target.c_str());
+	sl->SetDescription(L"Send a Spout sender to a virtual webcam");
+	std::wstring dir = target.substr(0, target.find_last_of(L'\\'));
+	sl->SetWorkingDirectory(dir.c_str());
+
+	bool ok = false;
+	IPersistFile* pf = nullptr;
+	if (SUCCEEDED(sl->QueryInterface(IID_IPersistFile, (void**)&pf)) && pf) {
+		ok = SUCCEEDED(pf->Save(link.c_str(), TRUE));
+		pf->Release();
+	}
+	sl->Release();
+	return ok;
+}
+
+static void WriteMachineString(const wchar_t* name, const std::wstring& value)
+{
+	HKEY key = nullptr;
+	if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kUninstallKey, 0, nullptr, 0,
+			KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
 		return;
+	RegSetValueExW(key, name, 0, REG_SZ, (const BYTE*)value.c_str(),
+		(DWORD)((value.size()+1)*sizeof(wchar_t)));
+	RegCloseKey(key);
+}
+
+static void WriteMachineDword(const wchar_t* name, DWORD value)
+{
+	HKEY key = nullptr;
+	if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kUninstallKey, 0, nullptr, 0,
+			KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+		return;
+	RegSetValueExW(key, name, 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
+	RegCloseKey(key);
+}
+
+//
+// Copy the program and its filter somewhere permanent, then register from
+// there. Registering in place is the trap worth avoiding: the registry records
+// the path of the .ax file, so a downloads folder that gets tidied away later
+// leaves a camera Windows cannot load.
+//
+static int DoInstall()
+{
+	const std::wstring dest   = InstallDir();
+	const std::wstring filter = dest + L"\\filter";
+	const std::wstring ax64   = FindFilterFor(64);
+	const std::wstring ax32   = FindFilterFor(32);
+
+	if (ax64.empty())
+		return 2; // nothing to install
+
+	// Whatever is registered now goes first, wherever it came from, or Windows
+	// would keep loading that copy in preference to this one
+	const std::wstring live = RegisteredFilterPath();
+	if (!live.empty())
+		Regsvr(live, true, false);
+
+	CreateDirectoryW(dest.c_str(), nullptr);
+	CreateDirectoryW(filter.c_str(), nullptr);
+
+	const std::wstring self = SelfPath();
+	const std::wstring exe  = dest + L"\\SpoutCamSettings.exe";
+	if (_wcsicmp(self.c_str(), exe.c_str()) != 0) {
+		if (!CopyFileW(self.c_str(), exe.c_str(), FALSE))
+			return 3;
 	}
 
-	std::wstring args = bUnregister ? L"/s /u \"" : L"/s \"";
-	args += filter;
-	args += L"\"";
+	if (!CopyFileW(ax64.c_str(), (filter + L"\\SpoutCam64.ax").c_str(), FALSE))
+		return 3;
+	if (!ax32.empty())
+		CopyFileW(ax32.c_str(), (filter + L"\\SpoutCam32.ax").c_str(), FALSE);
 
+	if (!Regsvr(filter + L"\\SpoutCam64.ax", false, false))
+		return 4;
+
+	// 32 bit hosts load their own build. Not every download carries one, and
+	// failing to register it is not a reason to fail the install.
+	if (!ax32.empty())
+		Regsvr(filter + L"\\SpoutCam32.ax", false, true);
+
+	MakeShortcut(ShortcutPath(), exe);
+
+	WriteMachineString(L"DisplayName",     L"SpoutCam");
+	WriteMachineString(L"DisplayVersion",  L"1.0.0");
+	WriteMachineString(L"Publisher",       L"SpoutCam contributors");
+	WriteMachineString(L"InstallLocation", dest);
+	WriteMachineString(L"DisplayIcon",     exe);
+	WriteMachineString(L"UninstallString", L"\"" + exe + L"\" /uninstall");
+	WriteMachineDword (L"NoModify", 1);
+	WriteMachineDword (L"NoRepair", 1);
+
+	return 0;
+}
+
+static int DoUninstall()
+{
+	const std::wstring dest   = InstallDir();
+	const std::wstring filter = dest + L"\\filter";
+
+	Regsvr(filter + L"\\SpoutCam64.ax", true, false);
+	if (GetFileAttributesW((filter + L"\\SpoutCam32.ax").c_str()) != INVALID_FILE_ATTRIBUTES)
+		Regsvr(filter + L"\\SpoutCam32.ax", true, true);
+
+	// Anything still registered, in case it was not the copy installed here
+	const std::wstring live = RegisteredFilterPath();
+	if (!live.empty())
+		Regsvr(live, true, false);
+
+	DeleteFileW(ShortcutPath().c_str());
+	RegDeleteKeyW(HKEY_LOCAL_MACHINE, kUninstallKey);
+
+	DeleteFileW((filter + L"\\SpoutCam64.ax").c_str());
+	DeleteFileW((filter + L"\\SpoutCam32.ax").c_str());
+	RemoveDirectoryW(filter.c_str());
+
+	// The copy being uninstalled is usually the one that started this, and
+	// Windows holds an executable open until its process has fully gone. Keep
+	// trying for a few seconds rather than leaving the file behind.
+	const std::wstring exe = dest + L"\\SpoutCamSettings.exe";
+	for (int i = 0; i < 40; i++) {
+		if (DeleteFileW(exe.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
+			break;
+		Sleep(250);
+	}
+	RemoveDirectoryW(dest.c_str());
+
+	// This build is running from the temporary folder, so it cannot delete
+	// itself either. Hand that to the next restart.
+	MoveFileExW(SelfPath().c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+
+	// Settings under HKCU are left alone, so reinstalling keeps them
+	return 0;
+}
+
+//
+// Ask for the elevation this needs, by starting the same executable again with
+// the work to do. Returns false if the user declined the prompt.
+//
+static bool RunElevated(const wchar_t* verb)
+{
 	SHELLEXECUTEINFOW sei = {};
 	sei.cbSize       = sizeof(sei);
 	sei.fMask        = SEE_MASK_NOCLOSEPROCESS;
 	sei.hwnd         = g_hMain;
-	sei.lpVerb       = L"runas";      // triggers the elevation prompt
-	sei.lpFile       = L"regsvr32.exe";
-	sei.lpParameters = args.c_str();
+	sei.lpVerb       = L"runas";
+	const std::wstring self = SelfPath();
+	sei.lpFile       = self.c_str();
+	sei.lpParameters = verb;
 	sei.nShow        = SW_HIDE;
 
-	if (!ShellExecuteExW(&sei)) {
-		if (GetLastError() != ERROR_CANCELLED) {
-			MessageBoxW(g_hMain, L"Could not start regsvr32.",
-				L"SpoutCam Settings", MB_OK | MB_ICONERROR);
-		}
-		return;
-	}
+	if (!ShellExecuteExW(&sei))
+		return false;
 
 	DWORD code = 1;
 	if (sei.hProcess) {
-		WaitForSingleObject(sei.hProcess, 30000);
+		WaitForSingleObject(sei.hProcess, 120000);
 		GetExitCodeProcess(sei.hProcess, &code);
 		CloseHandle(sei.hProcess);
 	}
+	return code == 0;
+}
 
-	if (code == 0) {
+static void InstallOrRemove(bool bRemove)
+{
+	if (!bRemove && FindFilterFor(64).empty()) {
 		MessageBoxW(g_hMain,
-			bUnregister
-				? L"Camera removed.\n\n"
-				  L"Close and reopen any program that was using it."
-				: L"Camera installed.\n\n"
-				  L"It appears as \"SpoutCam\" in the camera list. Programs that "
-				  L"were already open need restarting before they will see it.",
-			L"SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+			L"Could not find SpoutCam64.ax.\n\n"
+			L"It should sit in a SpoutCam folder next to this program. If this "
+			L"came from a release download, unzip the whole thing and run it "
+			L"from there rather than moving the program out on its own.",
+			L"SpoutCam", MB_OK | MB_ICONWARNING);
+		return;
+	}
+
+	const bool ok = RunElevated(bRemove ? L"/uninstall" : L"/install");
+
+	// Removing can finish in a detached process, so give it a moment before
+	// asking the registry what is installed
+	if (ok && bRemove)
+		Sleep(1500);
+
+	if (ok) {
+		MessageBoxW(g_hMain,
+			bRemove
+				? L"SpoutCam has been removed.\n\n"
+				  L"Close and reopen any program that was using the camera."
+				: L"SpoutCam is installed.\n\n"
+				  L"It is in the Start menu, and the camera appears as "
+				  L"\"SpoutCam\". Programs that were already open need "
+				  L"restarting before they will see it.",
+			L"SpoutCam", MB_OK | MB_ICONINFORMATION);
 	}
 	else {
 		MessageBoxW(g_hMain,
-			bUnregister
-				? L"Could not remove the camera."
-				: L"Could not install the camera.\n\n"
-				  L"If a program is using it, close that first and try again.",
-			L"SpoutCam Settings", MB_OK | MB_ICONERROR);
+			bRemove
+				? L"Could not remove SpoutCam.\n\n"
+				  L"If a program is using the camera, close it and try again."
+				: L"Could not install SpoutCam.\n\n"
+				  L"If a program is using the camera, close it and try again.",
+			L"SpoutCam", MB_OK | MB_ICONERROR);
 	}
 
 	PushCameraStatus();
@@ -427,10 +698,10 @@ static void HandleMessage(const std::wstring& json)
 		SaveSettings(json);
 	}
 	else if (type == L"register") {
-		RegisterFilter(false);
+		InstallOrRemove(false);
 	}
 	else if (type == L"unregister") {
-		RegisterFilter(true);
+		InstallOrRemove(true);
 	}
 	else if (type == L"orient") {
 		g_preview.SetOrientation(
@@ -438,6 +709,19 @@ static void HandleMessage(const std::wstring& json)
 			JsonInt(json, L"flip", 0) != 0,
 			JsonInt(json, L"swap", 0) != 0,
 			(unsigned int)JsonInt(json, L"rotate", 0));
+
+		const int rgb = JsonInt(json, L"keyrgb", 0x0000FF00);
+		int thr = JsonInt(json, L"thr", 128);
+		if (thr < 0)   thr = 0;
+		if (thr > 255) thr = 255;
+
+		g_preview.SetKey(
+			JsonInt(json, L"keyon", 0) != 0,
+			(unsigned char)((rgb >> 16) & 0xFF),
+			(unsigned char)((rgb >> 8) & 0xFF),
+			(unsigned char)(rgb & 0xFF),
+			JsonInt(json, L"hard", 0) != 0,
+			(unsigned char)thr);
 	}
 	else if (type == L"preview") {
 		// Grow the window to make room rather than letting the panel scroll.
@@ -472,7 +756,19 @@ static void UpdateTally()
 	bool live = false;
 
 	if (!g_preview.IsVisible()) {
-		text = L"idle";
+		// The lamp reports the sender, not the preview, so collapsing the panel
+		// must not make it look as though nothing is running. Reading the
+		// sender's description costs nothing - no texture and no DirectX.
+		unsigned int w = 0, h = 0;
+		if (g_preview.ProbeSender(w, h)) {
+			live = true;
+			wchar_t buf[128];
+			swprintf_s(buf, L"%ux%u", w, h);
+			text = buf;
+		}
+		else {
+			text = L"no signal";
+		}
 	}
 	else if (!g_preview.IsConnected()) {
 		text = L"no signal";
@@ -585,9 +881,33 @@ static void AddTrayIcon(HWND hWnd, HINSTANCE hInst)
 	g_tray.uID              = kTrayIconId;
 	g_tray.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 	g_tray.uCallbackMessage = kTrayMsg;
-	g_tray.hIcon            = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_APPICON));
+
+	// Ask for the small size rather than letting LoadIcon hand back the 32
+	// pixel frame for Windows to squash
+	g_tray.hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON,
+		GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+
 	wcscpy_s(g_tray.szTip, L"SpoutCam");
 	Shell_NotifyIconW(NIM_ADD, &g_tray);
+}
+
+//
+// A window that vanishes with no explanation looks like a crash. Said once and
+// then remembered, because it stops being news after the first time.
+//
+static void ExplainTray()
+{
+	if (ReadDword(L"trayhint", 0))
+		return;
+	WriteDword(L"trayhint", 1);
+
+	MessageBoxW(nullptr,
+		L"SpoutCam Settings is still running, down in the notification area "
+		L"beside the clock.\n\n"
+		L"The camera keeps working while it sits there. Click the icon to bring "
+		L"this window back, or right click it and choose Quit to stop the camera.\n\n"
+		L"This is only said once.",
+		L"Minimised to the notification area", MB_OK | MB_ICONINFORMATION);
 }
 
 static void ShowPanel(HWND hWnd)
@@ -625,6 +945,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 		// running, which is the point of leaving the program open at all.
 		if ((wp & 0xFFF0) == SC_MINIMIZE) {
 			ShowWindow(hWnd, SW_HIDE);
+			ExplainTray();
 			return 0;
 		}
 		break;
@@ -676,9 +997,42 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 	return DefWindowProcW(hWnd, msg, wp, lp);
 }
 
-int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
+int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int)
 {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+	//
+	// The elevated half of the installer. No window, no console, no message
+	// loop: copy files, register the filter, write the Start menu entry, exit.
+	// COM is needed for the shortcut.
+	//
+	const std::wstring cmd = lpCmdLine ? lpCmdLine : L"";
+	const bool bInstall   = cmd.find(L"/install")   != std::wstring::npos;
+	const bool bUninstall = cmd.find(L"/uninstall") != std::wstring::npos;
+
+	if (bInstall || bUninstall) {
+		if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)))
+			return 1;
+
+		// Uninstalling deletes the very file that is running, which Windows
+		// will not allow. Carry on from a copy in the temporary folder, and do
+		// not wait for it: it is waiting for this process to exit so the
+		// executable stops being held open.
+		if (bUninstall && IsInstalledCopy()) {
+			wchar_t tmp[MAX_PATH] = {};
+			GetTempPathW(MAX_PATH, tmp);
+			const std::wstring copy = std::wstring(tmp) + L"SpoutCamUninstall.exe";
+			if (CopyFileW(SelfPath().c_str(), copy.c_str(), FALSE)) {
+				RunDetached(L"\"" + copy + L"\" /uninstall");
+				CoUninitialize();
+				return 0;
+			}
+		}
+
+		const int rc = bInstall ? DoInstall() : DoUninstall();
+		CoUninitialize();
+		return rc;
+	}
 
 	// Held for the lifetime of the program. The filter opens it by name to
 	// decide whether to pass the sender through, and a second copy of this

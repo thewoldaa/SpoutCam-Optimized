@@ -139,30 +139,38 @@ It needs the WebView2 SDK in `SpoutCamSettings\packages`:
 nuget install Microsoft.Web.WebView2 -OutputDirectory packages
 ```
 
-## Installing the camera
+## Installing
 
-Run `SpoutCamSettings.exe` and press Install under Camera. That is the whole
-process. Windows will ask for administrator rights once, because a DirectShow
-filter is registered system wide. Every virtual camera on Windows works this way.
+Unzip anywhere, run `SpoutCamSettings.exe`, press Install under Camera. Windows
+asks for administrator rights once, because a DirectShow filter is registered
+machine wide. Every virtual camera on Windows works this way.
 
-The Camera section shows what is actually registered, which matters more than it
-sounds. Registration records the path of the filter file, so if a copy was ever
-registered from somewhere else, that is the one Windows keeps loading. The panel
-says so and offers to replace it.
+The program installs itself rather than shipping a separate installer, so no
+console window ever appears. It copies itself and the filter to
+`C:\Program Files\SpoutCam`, registers the filter from there, adds a Start menu
+entry, and writes an uninstall entry so it turns up in Settings, Apps like
+anything else. Remove undoes all of it and leaves your settings alone, so
+reinstalling keeps them.
 
-Installing once is enough. Rebuilding over the same path is picked up without
-registering again, since only the path is recorded. What a rebuild does need is
-for any program holding the camera open to be closed first, because a loaded DLL
-cannot be overwritten.
+Copying out of the download folder is the point rather than tidiness.
+Registration records the path of the .ax file, not its contents, so a filter
+registered from a folder that later gets cleaned up leaves a camera Windows
+cannot load.
 
-`install.cmd` in the repository root does the same thing from a command line, and
-takes `/u` to remove. Or by hand:
+The Camera section shows what is actually registered. If a copy was ever
+registered from somewhere else, that is the one Windows keeps loading, and the
+panel says so and offers to replace it.
+
+Working on the filter itself is different: register the build output in place
+and rebuilding over the same path is picked up without registering again.
 
 ```
-regsvr32 SpoutCam64.ax
+regsvr32 SpoutCam\binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax
 ```
 
-32-bit hosts need `SpoutCam32.ax` registered as well.
+A rebuild does need any program holding the camera open to be closed first,
+because a loaded DLL cannot be overwritten, and reopened afterwards, because a
+loaded DLL is not reloaded either. 32-bit hosts need `SpoutCam32.ax`.
 
 ## A note on antivirus warnings
 

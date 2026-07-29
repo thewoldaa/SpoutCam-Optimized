@@ -37,6 +37,16 @@ public:
 	// shows what is being set rather than what was last saved.
 	void SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned int rotate);
 
+	// Same for the key colour, so the preview shows what the camera will send
+	// rather than the checkerboard it uses to reveal alpha.
+	void SetKey(bool bOn, unsigned char r, unsigned char g, unsigned char b,
+		bool bHardEdge, unsigned char threshold);
+
+	// Is a sender running, and how big? Answered without connecting to it, so
+	// the header lamp still works while the preview is collapsed. This reads
+	// the sender's shared memory description only, no texture and no DirectX.
+	bool ProbeSender(unsigned int& width, unsigned int& height);
+
 	bool IsVisible()   const { return m_bShow; }
 	bool IsConnected() const { return m_bConnected; }
 	bool HasAlpha()    const { return m_bHasAlpha; }
@@ -78,6 +88,11 @@ private:
 	bool m_bFlip   = false;
 	bool m_bSwap   = false;
 	unsigned int m_Rotate = 0;
+
+	bool m_bKey = false;
+	unsigned char m_KeyR = 0, m_KeyG = 255, m_KeyB = 0;
+	bool m_bKeyHardEdge = false;
+	unsigned char m_KeyThreshold = 128;
 
 	spoutCopy m_Copy;
 };
