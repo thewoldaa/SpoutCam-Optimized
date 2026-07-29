@@ -1,0 +1,591 @@
+<title>SpoutCam Settings</title>
+<style>
+  /* ------------------------------------------------------------------
+     Broadcast instrument panel.
+     Dense rows, hairline rules, monospaced values, amber tally accent.
+     Sized for a small always-in-the-way-of-nothing utility window.
+     Fonts are Windows built-ins only - this page loads from memory with
+     no network access, so a webfont would simply fail to arrive.
+     ------------------------------------------------------------------ */
+
+  :root {
+    --bg:        #16181c;
+    --panel:     #1c1f24;
+    --raised:    #23272e;
+    --rule:      #2c313a;
+    --rule-soft: #24282f;
+    --text:      #d8dbe0;
+    --dim:       #8b929e;
+    --faint:     #5b626d;
+    --tally:     #ffa23a;
+    --tally-dim: #7a4f16;
+    --live:      #3ddc84;
+    --danger:    #ff6b5e;
+
+    --sans: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+    --row-h: 30px;
+    --pad: 14px;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:        #eceef1;
+      --panel:     #f7f8fa;
+      --raised:    #ffffff;
+      --rule:      #d2d6dd;
+      --rule-soft: #e2e5ea;
+      --text:      #21252b;
+      --dim:       #5f6672;
+      --faint:     #9aa1ad;
+      --tally:     #c46a00;
+      --tally-dim: #f0d3ab;
+      --live:      #1a9e56;
+      --danger:    #cc3b2e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 12px/1.4 var(--sans);
+    -webkit-user-select: none;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------------- header ---------------- */
+
+  header {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 var(--pad);
+    height: 38px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .wordmark b { color: var(--tally); font-weight: 600; }
+
+  .tally {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .lamp {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--faint);
+    box-shadow: none;
+    transition: background .25s, box-shadow .25s;
+  }
+  .tally[data-live="1"] { color: var(--live); }
+  .tally[data-live="1"] .lamp {
+    background: var(--live);
+    box-shadow: 0 0 6px var(--live);
+  }
+
+  /* ---------------- scroll body ---------------- */
+
+  main {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+  }
+
+  /* ---------------- sections ---------------- */
+
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 var(--pad);
+    margin-top: 14px;
+    margin-bottom: 2px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .legend::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule-soft);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--row-h);
+    padding: 0 var(--pad);
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .row:last-child { border-bottom: none; }
+  .row > label:first-child {
+    flex: 1;
+    color: var(--dim);
+  }
+  .row.stack {
+    display: block;
+    padding-top: 6px;
+    padding-bottom: 8px;
+  }
+
+  /* ---------------- controls ---------------- */
+
+  select, input[type=text] {
+    font: 12px var(--mono);
+    color: var(--text);
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 3px 6px;
+    outline: none;
+  }
+  select { width: 132px; }
+  input[type=text] { width: 132px; }
+  select:focus, input[type=text]:focus {
+    border-color: var(--tally);
+  }
+  input[type=text]::placeholder { color: var(--faint); }
+
+  /* checkbox as a small tactile switch */
+  .checks { display: flex; gap: 6px; }
+  .chk {
+    position: relative;
+    flex: 1;
+  }
+  .chk input { position: absolute; opacity: 0; pointer-events: none; }
+  .chk span {
+    display: block;
+    text-align: center;
+    padding: 4px 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .chk input:checked + span {
+    color: var(--tally);
+    border-color: var(--tally);
+    background: color-mix(in srgb, var(--tally) 12%, var(--raised));
+  }
+  .chk input:focus-visible + span { outline: 1px solid var(--tally); outline-offset: 1px; }
+
+  /* toggle */
+  .toggle {
+    position: relative;
+    width: 34px; height: 18px;
+    flex: none;
+  }
+  .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .toggle span {
+    position: absolute; inset: 0;
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background .18s, border-color .18s;
+  }
+  .toggle span::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--faint);
+    transition: transform .18s cubic-bezier(.3,.9,.4,1), background .18s;
+  }
+  .toggle input:checked + span {
+    border-color: var(--tally);
+    background: color-mix(in srgb, var(--tally) 18%, var(--raised));
+  }
+  .toggle input:checked + span::after {
+    transform: translateX(16px);
+    background: var(--tally);
+  }
+
+  /* colour swatches */
+  .swatches { display: flex; gap: 6px; align-items: center; }
+  .sw {
+    width: 22px; height: 22px;
+    border-radius: 3px;
+    border: 1px solid var(--rule);
+    cursor: pointer;
+    padding: 0;
+    position: relative;
+    transition: transform .12s;
+  }
+  .sw:hover { transform: translateY(-1px); }
+  .sw[aria-pressed="true"] {
+    border-color: var(--text);
+    box-shadow: 0 0 0 1px var(--text);
+  }
+  .sw.custom {
+    background: var(--raised);
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+  }
+  input[type=color] {
+    width: 22px; height: 22px;
+    padding: 0; border: none; background: none;
+    cursor: pointer;
+  }
+
+  /* slider */
+  .slider-row { display: flex; align-items: center; gap: 8px; }
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--rule);
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--tally);
+    cursor: pointer;
+    border: none;
+  }
+  .readout {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--tally);
+    min-width: 26px;
+    text-align: right;
+  }
+
+  /* disabled group */
+  .group[data-on="0"] { opacity: .38; pointer-events: none; }
+
+  /* ---------------- preview ---------------- */
+
+  .preview-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 var(--pad);
+    min-height: var(--row-h);
+    cursor: pointer;
+    color: var(--dim);
+  }
+  .preview-head:hover { color: var(--text); }
+  .caret {
+    font-family: var(--mono);
+    color: var(--faint);
+    transition: transform .18s;
+    display: inline-block;
+  }
+  .preview-head[aria-expanded="true"] .caret { transform: rotate(90deg); }
+  .preview-hint {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+  }
+
+  /* The native D3D11 preview window is positioned over this slot.
+     It stays empty on purpose - anything drawn here would be hidden. */
+  #preview-slot {
+    margin: 0 var(--pad) 10px;
+    height: 0;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    background: #000;
+    transition: height .2s ease, border-color .2s;
+    overflow: hidden;
+  }
+  #preview-slot.open {
+    height: 152px;
+    border-color: var(--rule);
+  }
+
+  /* ---------------- footer ---------------- */
+
+  footer {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px var(--pad);
+    background: var(--panel);
+    border-top: 1px solid var(--rule);
+  }
+
+  button.btn {
+    font: 11px/1 var(--sans);
+    padding: 7px 13px;
+    border-radius: 3px;
+    border: 1px solid var(--rule);
+    background: var(--raised);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color .15s, background .15s, color .15s;
+  }
+  button.btn:hover { border-color: var(--faint); }
+  button.btn.link {
+    border-color: transparent;
+    background: none;
+    color: var(--dim);
+    padding-left: 0;
+  }
+  button.btn.link:hover { color: var(--tally); }
+  button.btn.primary {
+    background: var(--tally);
+    border-color: var(--tally);
+    color: #17181b;
+    font-weight: 600;
+    margin-left: auto;
+  }
+  button.btn.primary:hover { filter: brightness(1.08); }
+
+  .spacer { flex: 1; }
+</style>
+
+<header>
+  <div class="wordmark">Spout<b>Cam</b></div>
+  <div class="tally" id="tally" data-live="0">
+    <span class="lamp"></span><span id="tally-text">no signal</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="legend">Output</div>
+
+  <div class="row">
+    <label for="fps">Frame rate</label>
+    <select id="fps">
+      <option value="0">10 fps</option>
+      <option value="1">15 fps</option>
+      <option value="2">25 fps</option>
+      <option value="3">30 fps</option>
+      <option value="4">50 fps</option>
+      <option value="5">60 fps</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="res">Resolution</label>
+    <select id="res">
+      <option value="0">Active sender</option>
+      <option value="1">320 x 240</option>
+      <option value="2">640 x 360</option>
+      <option value="3">640 x 480</option>
+      <option value="4">800 x 600</option>
+      <option value="5">1024 x 720</option>
+      <option value="6">1024 x 768</option>
+      <option value="7">1280 x 720</option>
+      <option value="8">1280 x 960</option>
+      <option value="9">1280 x 1024</option>
+      <option value="10">1920 x 1080</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="sender">Lock to sender</label>
+    <input type="text" id="sender" placeholder="any" spellcheck="false">
+  </div>
+
+  <div class="legend">Orientation</div>
+
+  <div class="row stack">
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="mirror"><span>Mirror</span></label>
+      <label class="chk"><input type="checkbox" id="flip"><span>Flip</span></label>
+      <label class="chk"><input type="checkbox" id="swap"><span>Swap</span></label>
+    </div>
+  </div>
+
+  <div class="legend">Transparency</div>
+
+  <div class="row">
+    <label for="keyon">Composite on key colour</label>
+    <label class="toggle"><input type="checkbox" id="keyon"><span></span></label>
+  </div>
+
+  <div class="group" id="keygroup" data-on="0">
+    <div class="row">
+      <label>Key colour</label>
+      <div class="swatches" id="swatches">
+        <button class="sw" data-c="#00ff00" style="background:#00ff00" aria-pressed="true" title="Green"></button>
+        <button class="sw" data-c="#0000ff" style="background:#0000ff" aria-pressed="false" title="Blue"></button>
+        <button class="sw" data-c="#ff00ff" style="background:#ff00ff" aria-pressed="false" title="Magenta"></button>
+        <button class="sw" data-c="#000000" style="background:#000000" aria-pressed="false" title="Black"></button>
+        <input type="color" id="custom" value="#00ff00" title="Custom colour">
+      </div>
+    </div>
+
+    <div class="row">
+      <label for="hard">Hard edge</label>
+      <label class="toggle"><input type="checkbox" id="hard"><span></span></label>
+    </div>
+
+    <div class="row" id="thrrow">
+      <label for="thr">Edge threshold</label>
+      <div class="slider-row" style="width:132px">
+        <input type="range" id="thr" min="1" max="254" value="128">
+        <span class="readout" id="throut">128</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">Monitor</div>
+
+  <div class="preview-head" id="prevhead" aria-expanded="false">
+    <span class="caret">&#9656;</span>
+    <span>Live preview</span>
+    <span class="preview-hint" id="prevhint">hidden</span>
+  </div>
+  <div id="preview-slot"></div>
+
+</main>
+
+<footer>
+  <button class="btn link" id="register">Register filter</button>
+  <div class="spacer"></div>
+  <button class="btn" id="cancel">Cancel</button>
+  <button class="btn primary" id="ok">Save</button>
+</footer>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const send = msg => window.chrome?.webview?.postMessage(JSON.stringify(msg));
+
+  /* ---- key colour swatches ---- */
+  const swatches = [...document.querySelectorAll('.sw')];
+  function setColour(hex, fromPicker) {
+    $('custom').value = hex;
+    swatches.forEach(s => s.setAttribute('aria-pressed',
+      String(!fromPicker && s.dataset.c.toLowerCase() === hex.toLowerCase())));
+  }
+  swatches.forEach(s => s.addEventListener('click', () => setColour(s.dataset.c, false)));
+  $('custom').addEventListener('input', e => setColour(e.target.value, true));
+
+  /* ---- dependent enable states ---- */
+  function syncEnabled() {
+    $('keygroup').dataset.on = $('keyon').checked ? '1' : '0';
+    $('thrrow').style.display = $('hard').checked ? '' : 'none';
+  }
+  $('keyon').addEventListener('change', syncEnabled);
+  $('hard').addEventListener('change', syncEnabled);
+  $('thr').addEventListener('input', e => $('throut').textContent = e.target.value);
+
+  /* ---- preview show / hide ----
+     The native window is only moved when the slot has a real size, so the
+     rect is reported after the height transition rather than during it. */
+  let previewOpen = false;
+  function reportPreviewRect() {
+    const slot = $('preview-slot');
+    const r = slot.getBoundingClientRect();
+    send({ type: 'preview', show: previewOpen,
+           x: Math.round(r.left), y: Math.round(r.top),
+           w: Math.round(r.width), h: Math.round(r.height),
+           dpr: window.devicePixelRatio });
+  }
+  function setPreview(open) {
+    previewOpen = open;
+    $('preview-slot').classList.toggle('open', open);
+    $('prevhead').setAttribute('aria-expanded', String(open));
+    $('prevhint').textContent = open ? 'visible' : 'hidden';
+    if (!open) reportPreviewRect();                 // hide at once
+  }
+  $('prevhead').addEventListener('click', () => setPreview(!previewOpen));
+  $('preview-slot').addEventListener('transitionend', e => {
+    if (e.propertyName === 'height' && previewOpen) reportPreviewRect();
+  });
+  window.addEventListener('resize', () => { if (previewOpen) reportPreviewRect(); });
+  document.querySelector('main').addEventListener('scroll', () => {
+    if (previewOpen) reportPreviewRect();
+  });
+
+  /* ---- collect / apply ---- */
+  function collect() {
+    const hex = $('custom').value;
+    return {
+      type: 'save',
+      fps: +$('fps').value,
+      res: +$('res').value,
+      sender: $('sender').value,
+      mirror: $('mirror').checked ? 1 : 0,
+      flip: $('flip').checked ? 1 : 0,
+      swap: $('swap').checked ? 1 : 0,
+      keyon: $('keyon').checked ? 1 : 0,
+      keyrgb: parseInt(hex.slice(1), 16),
+      hard: $('hard').checked ? 1 : 0,
+      thr: +$('thr').value,
+      preview: previewOpen ? 1 : 0
+    };
+  }
+
+  window.applySettings = s => {
+    $('fps').value = s.fps;
+    $('res').value = s.res;
+    $('sender').value = s.sender || '';
+    $('mirror').checked = !!s.mirror;
+    $('flip').checked = !!s.flip;
+    $('swap').checked = !!s.swap;
+    $('keyon').checked = !!s.keyon;
+    $('hard').checked = !!s.hard;
+    $('thr').value = s.thr;
+    $('throut').textContent = s.thr;
+    setColour('#' + (s.keyrgb >>> 0).toString(16).padStart(6, '0'), false);
+    syncEnabled();
+    // Reopen the preview if it was left open last time
+    if (s.preview) setPreview(true);
+  };
+
+  window.setTally = (live, text) => {
+    $('tally').dataset.live = live ? '1' : '0';
+    $('tally-text').textContent = text;
+  };
+
+  $('ok').addEventListener('click', () => send(collect()));
+  $('cancel').addEventListener('click', () => send({ type: 'cancel' }));
+  $('register').addEventListener('click', () => send({ type: 'register' }));
+
+  syncEnabled();
+  send({ type: 'ready' });
+</script>

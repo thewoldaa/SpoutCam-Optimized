@@ -1,0 +1,24 @@
+# Build output
+x64/
+Win32/
+lib/
+build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.res
+*.tlog
+*.log
+*.idb
+
+# Compiled filter, produced by the build
+*.ax
+
+# Visual Studio
+.vs/
+*.user
+*.aps
+
+# Fetched by build.cmd, not checked in
+SpoutCamSettings/packages/
