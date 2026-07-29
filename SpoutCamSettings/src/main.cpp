@@ -30,6 +30,11 @@ using namespace Microsoft::WRL;
 static const wchar_t* kRegPath = L"Software\\Leading Edge\\SpoutCam";
 static const wchar_t* kWndClass = L"SpoutCamSettingsMain";
 static const UINT_PTR kTimerId = 1;
+static const UINT_PTR kCloseTimerId = 2;
+
+// Closing asks the page for its current values first, so the window cannot be
+// torn down until that round trip finishes or gives up.
+static bool g_bClosing = false;
 
 static HWND  g_hMain = nullptr;
 static ComPtr<ICoreWebView2Controller> g_controller;
@@ -476,13 +481,28 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 			g_preview.Tick();
 			UpdateTally();
 		}
+		else if (wp == kCloseTimerId) {
+			// The page never came back with its values
+			KillTimer(hWnd, kCloseTimerId);
+			DestroyWindow(hWnd);
+		}
 		return 0;
 
 	case WM_CLOSE:
+		// Keep whatever is on screen rather than discarding it. The values
+		// live in the page, so they have to be asked for before closing.
+		if (!g_bClosing && g_webview && g_bReadyForScript) {
+			g_bClosing = true;
+			g_webview->ExecuteScript(L"window.requestSave();", nullptr);
+			// If the page cannot answer, close anyway rather than hang
+			SetTimer(hWnd, kCloseTimerId, 1500, nullptr);
+			return 0;
+		}
 		DestroyWindow(hWnd);
 		return 0;
 
 	case WM_DESTROY:
+		KillTimer(hWnd, kCloseTimerId);
 		KillTimer(hWnd, kTimerId);
 		g_preview.Destroy();
 		g_webview.Reset();

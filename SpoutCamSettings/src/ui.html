@@ -584,6 +584,11 @@
 
   $('ok').addEventListener('click', () => send(collect()));
   $('cancel').addEventListener('click', () => send({ type: 'cancel' }));
+
+  // Called from the host when the window is closing, so shutting the panel
+  // keeps the current values instead of throwing them away. Cancel still
+  // discards, otherwise there would be no way to back out of a change.
+  window.requestSave = () => send(collect());
   $('register').addEventListener('click', () => send({ type: 'register' }));
 
   syncEnabled();
