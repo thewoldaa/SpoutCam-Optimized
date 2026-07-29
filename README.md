@@ -126,16 +126,30 @@ It needs the WebView2 SDK in `SpoutCamSettings\packages`:
 nuget install Microsoft.Web.WebView2 -OutputDirectory packages
 ```
 
-## Registering
+## Installing the camera
 
-Registration writes to the system registry and needs administrator rights. Use the
-button in SpoutCamSettings, or run:
+Run `SpoutCamSettings.exe` and press Install under Camera. That is the whole
+process. Windows will ask for administrator rights once, because a DirectShow
+filter is registered system wide. Every virtual camera on Windows works this way.
+
+The Camera section shows what is actually registered, which matters more than it
+sounds. Registration records the path of the filter file, so if a copy was ever
+registered from somewhere else, that is the one Windows keeps loading. The panel
+says so and offers to replace it.
+
+Installing once is enough. Rebuilding over the same path is picked up without
+registering again, since only the path is recorded. What a rebuild does need is
+for any program holding the camera open to be closed first, because a loaded DLL
+cannot be overwritten.
+
+`install.cmd` in the repository root does the same thing from a command line, and
+takes `/u` to remove. Or by hand:
 
 ```
 regsvr32 SpoutCam64.ax
 ```
 
-Both builds can be registered. 32-bit hosts need `SpoutCam32.ax`.
+32-bit hosts need `SpoutCam32.ax` registered as well.
 
 ## A note on antivirus warnings
 

@@ -216,19 +216,74 @@ static std::wstring FindFilter()
 }
 
 
-static void RegisterFilter()
+// The filter's own class id, as declared in the SpoutCam sources
+static const wchar_t* kFilterClsid =
+	L"SOFTWARE\\Classes\\CLSID\\{8E14549A-DB61-4309-AFA1-3578E927E933}\\InprocServer32";
+
+//
+// Where Windows currently thinks the camera lives, if anywhere.
+// Empty means nothing is registered.
+//
+static std::wstring RegisteredFilterPath()
 {
-	const std::wstring filter = FindFilter();
+	wchar_t buf[MAX_PATH] = {};
+	DWORD size = sizeof(buf);
+	if (RegGetValueW(HKEY_LOCAL_MACHINE, kFilterClsid, nullptr,
+			RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
+		return buf;
+	return L"";
+}
+
+static bool SamePath(const std::wstring& a, const std::wstring& b)
+{
+	if (a.size() != b.size())
+		return false;
+	return _wcsicmp(a.c_str(), b.c_str()) == 0;
+}
+
+//
+// Tell the page whether the camera is installed, so it can offer the right
+// action instead of a button that means nothing until it is pressed.
+//
+static void PushCameraStatus()
+{
+	if (!g_webview || !g_bReadyForScript)
+		return;
+
+	const std::wstring mine = FindFilter();
+	const std::wstring live = RegisteredFilterPath();
+
+	const wchar_t* state = L"missing";   // no filter file to install
+	if (!mine.empty()) {
+		if (live.empty())            state = L"none";    // nothing registered
+		else if (SamePath(mine, live)) state = L"ours";  // this build is live
+		else                          state = L"other";  // a different copy is live
+	}
+
+	std::wstring script = L"window.setCameraStatus(\"";
+	script += state;
+	script += L"\",\"";
+	script += JsonEscape(live);
+	script += L"\");";
+
+	g_webview->ExecuteScript(script.c_str(), nullptr);
+}
+
+static void RegisterFilter(bool bUnregister)
+{
+	const std::wstring filter = bUnregister ? RegisteredFilterPath() : FindFilter();
 	if (filter.empty()) {
 		MessageBoxW(g_hMain,
-			L"Could not find the SpoutCam filter.\n\n"
-			L"Put SpoutCam64.ax next to this program, or run it from the "
-			L"SpoutCam folder, then try again.",
+			bUnregister
+				? L"Nothing is registered, so there is nothing to remove."
+				: L"Could not find the SpoutCam filter.\n\n"
+				  L"SpoutCam64.ax should sit in SpoutCam\\binaries\\SPOUTCAM\\"
+				  L"SpoutCam64 next to this program.",
 			L"SpoutCam Settings", MB_OK | MB_ICONWARNING);
 		return;
 	}
 
-	std::wstring args = L"/s \"";
+	std::wstring args = bUnregister ? L"/s /u \"" : L"/s \"";
 	args += filter;
 	args += L"\"";
 
@@ -256,11 +311,26 @@ static void RegisterFilter()
 		CloseHandle(sei.hProcess);
 	}
 
-	MessageBoxW(g_hMain,
-		code == 0 ? L"SpoutCam registered."
-		          : L"Registration failed. Check that the filter file is intact.",
-		L"SpoutCam Settings",
-		MB_OK | (code == 0 ? MB_ICONINFORMATION : MB_ICONERROR));
+	if (code == 0) {
+		MessageBoxW(g_hMain,
+			bUnregister
+				? L"Camera removed.\n\n"
+				  L"Close and reopen any program that was using it."
+				: L"Camera installed.\n\n"
+				  L"It appears as \"SpoutCam\" in the camera list. Programs that "
+				  L"were already open need restarting before they will see it.",
+			L"SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+	}
+	else {
+		MessageBoxW(g_hMain,
+			bUnregister
+				? L"Could not remove the camera."
+				: L"Could not install the camera.\n\n"
+				  L"If a program is using it, close that first and try again.",
+			L"SpoutCam Settings", MB_OK | MB_ICONERROR);
+	}
+
+	PushCameraStatus();
 }
 
 // ---------------------------------------------------------------- bridge
@@ -342,6 +412,7 @@ static void HandleMessage(const std::wstring& json)
 	if (type == L"ready") {
 		g_bReadyForScript = true;
 		PushSettingsToPage();
+		PushCameraStatus();
 	}
 	else if (type == L"save") {
 		SaveSettings(json);
@@ -351,7 +422,10 @@ static void HandleMessage(const std::wstring& json)
 		DestroyWindow(g_hMain);
 	}
 	else if (type == L"register") {
-		RegisterFilter();
+		RegisterFilter(false);
+	}
+	else if (type == L"unregister") {
+		RegisterFilter(true);
 	}
 	else if (type == L"orient") {
 		g_preview.SetOrientation(
@@ -570,7 +644,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int)
 	// Small enough to sit beside whatever it is being used to configure
 	const int dpi = GetDpiForSystem();
 	const int w = MulDiv(400, dpi, 96);
-	const int h = MulDiv(522, dpi, 96); // fits the collapsed panel with nothing to spare
+	const int h = MulDiv(578, dpi, 96); // fits the collapsed panel with nothing to spare
 
 	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam Settings",
 		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
