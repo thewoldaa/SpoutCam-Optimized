@@ -25,10 +25,10 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "FileDescription", "SpoutCam Settings"
+            VALUE "FileDescription", "SpoutCam"
             VALUE "FileVersion",     "1.0.0.0"
-            VALUE "InternalName",    "SpoutCamSettings"
-            VALUE "OriginalFilename","SpoutCamSettings.exe"
+            VALUE "InternalName",    "SpoutCam"
+            VALUE "OriginalFilename","SpoutCam.exe"
             VALUE "ProductName",     "SpoutCam"
             VALUE "ProductVersion",  "1.0.0.0"
         END

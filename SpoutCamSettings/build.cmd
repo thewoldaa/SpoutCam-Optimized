@@ -1,5 +1,5 @@
 @echo off
-rem Build SpoutCamSettings.
+rem Build the SpoutCam settings program.
 rem
 rem Usage:  build.cmd [x64|x86]      default x64
 rem
@@ -15,12 +15,12 @@ if "%ARCH%"=="" set ARCH=x64
 if /i "%ARCH%"=="x86" (
     set VCARCH=x86
     set WVARCH=x86
-    set EXENAME=SpoutCamSettings32.exe
+    set EXENAME=SpoutCam32.exe
 ) else (
     set ARCH=x64
     set VCARCH=x64
     set WVARCH=x64
-    set EXENAME=SpoutCamSettings.exe
+    set EXENAME=SpoutCam.exe
 )
 
 set ROOT=%~dp0

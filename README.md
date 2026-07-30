@@ -79,7 +79,7 @@ once and copied per frame.
 
 ### The camera follows the settings program
 
-SpoutCamSettings holds a named event while it runs, and the filter checks for it.
+The settings program holds a named event while it runs, and the filter checks for it.
 Quit the program and the camera goes idle, the same way quitting OBS stops its
 virtual camera. Minimise instead and it drops to the notification area, out of the
 way but still feeding the sender through.
@@ -88,7 +88,7 @@ The camera stays present in the host's device list either way. Idle means showin
 the name plate rather than disappearing, since a device that vanishes mid-session
 tends to upset the program using it.
 
-## SpoutCamSettings
+## The settings program
 
 The original settings program was never published in source form, so this is a new
 one. It builds to a single executable with no installer and no runtime DLL to ship.
@@ -127,10 +127,10 @@ build.cmd x64
 ```
 
 The finished program lands at the top of the repository as
-`SpoutCamSettings.exe`, next to the `SpoutCam` folder. Registration looks for the
-filter relative to the program, so leaving it there means the Register button
+`SpoutCam.exe`, next to the `SpoutCam` folder. Registration looks for the
+filter relative to the program, so leaving it there means the Install button
 works without being pointed at anything. `build.cmd x86` produces
-`SpoutCamSettings32.exe` beside it.
+`SpoutCam32.exe` beside it.
 
 It needs the WebView2 SDK in `SpoutCamSettings\packages`:
 
@@ -140,7 +140,7 @@ nuget install Microsoft.Web.WebView2 -OutputDirectory packages
 
 ## Installing
 
-Unzip anywhere, run `SpoutCamSettings.exe`, press Install under Camera. Windows
+Unzip anywhere, run `SpoutCam.exe`, press Install under Camera. Windows
 asks for administrator rights once, because a DirectShow filter is registered
 machine wide. Every virtual camera on Windows works this way.
 

@@ -1,5 +1,5 @@
 //
-// SpoutCamSettings
+// SpoutCam settings panel
 //
 // Settings panel for the SpoutCam DirectShow filter. The filter itself reads
 // nothing but the registry, so this program is only a front end for a handful
@@ -326,13 +326,13 @@ static std::wstring ShortcutPath()
 {
 	std::wstring data = EnvPath(L"ProgramData");
 	if (data.empty()) data = L"C:\\ProgramData";
-	return data + L"\\Microsoft\\Windows\\Start Menu\\Programs\\SpoutCam Settings.lnk";
+	return data + L"\\Microsoft\\Windows\\Start Menu\\Programs\\SpoutCam.lnk";
 }
 
 static bool IsInstalledCopy()
 {
 	const std::wstring self = SelfPath();
-	const std::wstring dest = InstallDir() + L"\\SpoutCamSettings.exe";
+	const std::wstring dest = InstallDir() + L"\\SpoutCam.exe";
 	return _wcsicmp(self.c_str(), dest.c_str()) == 0;
 }
 
@@ -467,7 +467,7 @@ static int DoInstall()
 	CreateDirectoryW(filter.c_str(), nullptr);
 
 	const std::wstring self = SelfPath();
-	const std::wstring exe  = dest + L"\\SpoutCamSettings.exe";
+	const std::wstring exe  = dest + L"\\SpoutCam.exe";
 	if (_wcsicmp(self.c_str(), exe.c_str()) != 0) {
 		if (!CopyFileW(self.c_str(), exe.c_str(), FALSE))
 			return 3;
@@ -524,7 +524,7 @@ static int DoUninstall()
 	// The copy being uninstalled is usually the one that started this, and
 	// Windows holds an executable open until its process has fully gone. Keep
 	// trying for a few seconds rather than leaving the file behind.
-	const std::wstring exe = dest + L"\\SpoutCamSettings.exe";
+	const std::wstring exe = dest + L"\\SpoutCam.exe";
 	for (int i = 0; i < 40; i++) {
 		if (DeleteFileW(exe.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND)
 			break;
@@ -814,7 +814,7 @@ static std::wstring UserDataFolder()
 		return L""; // let WebView2 fall back to its own default
 
 	std::wstring path = local;
-	path += L"\\SpoutCamSettings";
+	path += L"\\SpoutCam";
 	CreateDirectoryW(path.c_str(), nullptr); // fails harmlessly if it exists
 	return path;
 }
@@ -899,7 +899,7 @@ static void ExplainTray()
 	WriteDword(L"trayhint", 1);
 
 	MessageBoxW(nullptr,
-		L"SpoutCam Settings is still running, down in the notification area "
+		L"SpoutCam is still running, down in the notification area "
 		L"beside the clock.\n\n"
 		L"The camera keeps working while it sits there. Click the icon to bring "
 		L"this window back, or right click it and choose Quit to stop the camera.\n\n"
@@ -1064,7 +1064,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int)
 	const int w = MulDiv(400, dpi, 96);
 	const int h = MulDiv(534, dpi, 96); // fits the collapsed panel with nothing to spare
 
-	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam Settings",
+	g_hMain = CreateWindowExW(0, kWndClass, L"SpoutCam",
 		WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
 		CW_USEDEFAULT, CW_USEDEFAULT, w, h,
 		nullptr, nullptr, hInst, nullptr);
