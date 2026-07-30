@@ -398,6 +398,42 @@ static bool Regsvr(const std::wstring& ax, bool bUnregister, bool b32)
 	return RunHidden(cmd);
 }
 
+//
+// Copy over a file that something may still be holding open.
+//
+// A DLL that any program has loaded cannot be overwritten, and enumerating
+// cameras is enough to load this one, so a browser left running is enough to
+// block a reinstall. Windows will not let the file be written, but it will let
+// it be renamed out of the way, which leaves the loaded copy running in the
+// processes that have it and the new one on disk for everything after.
+//
+static bool CopyOver(const std::wstring& src, const std::wstring& dst)
+{
+	if (CopyFileW(src.c_str(), dst.c_str(), FALSE))
+		return true;
+
+	const std::wstring stale = dst + L".old";
+	DeleteFileW(stale.c_str()); // may itself still be held, which is fine
+	if (!MoveFileExW(dst.c_str(), stale.c_str(), MOVEFILE_REPLACE_EXISTING))
+		return false;
+
+	// Cleared on the next restart, by which point nothing is holding it
+	MoveFileExW(stale.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+
+	return CopyFileW(src.c_str(), dst.c_str(), FALSE) != FALSE;
+}
+
+//
+// Left behind for the unelevated half to read back. An install that fails with
+// nothing but a number is not worth reporting at all.
+//
+static void SetInstallError(const wchar_t* what)
+{
+	wchar_t buf[512];
+	swprintf_s(buf, L"%s (Windows error %lu)", what, GetLastError());
+	WriteString(L"lastinstallerror", buf);
+}
+
 static bool MakeShortcut(const std::wstring& link, const std::wstring& target)
 {
 	IShellLinkW* sl = nullptr;
@@ -454,8 +490,10 @@ static int DoInstall()
 	const std::wstring ax64   = FindFilterFor(64);
 	const std::wstring ax32   = FindFilterFor(32);
 
-	if (ax64.empty())
-		return 2; // nothing to install
+	if (ax64.empty()) {
+		WriteString(L"lastinstallerror", L"SpoutCam64.ax was not found next to the program");
+		return 2;
+	}
 
 	// Whatever is registered now goes first, wherever it came from, or Windows
 	// would keep loading that copy in preference to this one
@@ -469,17 +507,23 @@ static int DoInstall()
 	const std::wstring self = SelfPath();
 	const std::wstring exe  = dest + L"\\SpoutCam.exe";
 	if (_wcsicmp(self.c_str(), exe.c_str()) != 0) {
-		if (!CopyFileW(self.c_str(), exe.c_str(), FALSE))
+		if (!CopyOver(self, exe)) {
+			SetInstallError(L"could not write SpoutCam.exe");
 			return 3;
+		}
 	}
 
-	if (!CopyFileW(ax64.c_str(), (filter + L"\\SpoutCam64.ax").c_str(), FALSE))
+	if (!CopyOver(ax64, filter + L"\\SpoutCam64.ax")) {
+		SetInstallError(L"could not write SpoutCam64.ax");
 		return 3;
+	}
 	if (!ax32.empty())
-		CopyFileW(ax32.c_str(), (filter + L"\\SpoutCam32.ax").c_str(), FALSE);
+		CopyOver(ax32, filter + L"\\SpoutCam32.ax");
 
-	if (!Regsvr(filter + L"\\SpoutCam64.ax", false, false))
+	if (!Regsvr(filter + L"\\SpoutCam64.ax", false, false)) {
+		SetInstallError(L"regsvr32 could not register the camera");
 		return 4;
+	}
 
 	// 32 bit hosts load their own build. Not every download carries one, and
 	// failing to register it is not a reason to fail the install.
@@ -519,6 +563,19 @@ static int DoUninstall()
 
 	DeleteFileW((filter + L"\\SpoutCam64.ax").c_str());
 	DeleteFileW((filter + L"\\SpoutCam32.ax").c_str());
+
+	// Left by a reinstall that had to rename a loaded filter out of the way.
+	// Still held, most likely, so schedule it rather than expecting it to go.
+	const wchar_t* stale[] = { L"\\SpoutCam64.ax.old", L"\\SpoutCam32.ax.old" };
+	for (const wchar_t* s : stale) {
+		const std::wstring path = filter + s;
+		if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+			continue;
+		SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+		if (!DeleteFileW(path.c_str()))
+			MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+	}
+
 	RemoveDirectoryW(filter.c_str());
 
 	// The copy being uninstalled is usually the one that started this, and
@@ -580,6 +637,7 @@ static void InstallOrRemove(bool bRemove)
 		return;
 	}
 
+	WriteString(L"lastinstallerror", L"");
 	const bool ok = RunElevated(bRemove ? L"/uninstall" : L"/install");
 
 	// Removing can finish in a detached process, so give it a moment before
@@ -597,6 +655,17 @@ static void InstallOrRemove(bool bRemove)
 				  L"\"SpoutCam\". Programs that were already open need "
 				  L"restarting before they will see it.",
 			L"SpoutCam", MB_OK | MB_ICONINFORMATION);
+	}
+	else if (!bRemove) {
+		// Whatever went wrong knows more than this side of the elevation does,
+		// so it leaves a note rather than making the user guess
+		std::wstring why = ReadString(L"lastinstallerror");
+		std::wstring text = L"Could not install SpoutCam.\n\n";
+		if (!why.empty())
+			text += why + L"\n\n";
+		text += L"If a program is using the camera, close it and try again.";
+
+		MessageBoxW(g_hMain, text.c_str(), L"SpoutCam", MB_OK | MB_ICONERROR);
 	}
 	else {
 		MessageBoxW(g_hMain,
