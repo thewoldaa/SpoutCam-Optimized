@@ -208,21 +208,6 @@
   }
   .chk input:focus-visible + span { outline: 1px solid var(--tally); outline-offset: 1px; }
 
-  /* Rotation cycles rather than toggling, so it is a button wearing the
-     same chip as its neighbours */
-  button.chk {
-    border: none;
-    background: none;
-    padding: 0;
-    font: inherit;
-    cursor: pointer;
-  }
-  button.chk[data-on="1"] span {
-    color: var(--tally);
-    border-color: var(--tally);
-    background: color-mix(in srgb, var(--tally) 12%, var(--raised));
-  }
-
   /* toggle */
   .toggle {
     position: relative;
@@ -468,14 +453,7 @@
       <label class="chk"><input type="checkbox" id="mirror"><span>Mirror</span></label>
       <label class="chk"><input type="checkbox" id="flip"><span>Flip</span></label>
       <label class="chk"><input type="checkbox" id="swap"><span>Swap</span></label>
-      <button class="chk rot" id="rotate" type="button" data-on="0"
-              title="Turn a quarter clockwise"><span>&#8635; 0&deg;</span></button>
     </div>
-  </div>
-
-  <div class="row" id="rotnote" style="display:none">
-    <label class="note">A quarter turn swaps the camera width and height.
-      Remove and re-add the camera in the receiving program to pick it up.</label>
   </div>
 
   <div class="legend">Transparency</div>
@@ -552,22 +530,6 @@
   $('custom').addEventListener('input', e => { setColour(e.target.value, true); save(); });
 
   /* ---- dependent enable states ---- */
-  /* ---- rotation ----
-     Cycles a quarter turn per click instead of using a menu, since there are
-     only four values and they have a natural order. */
-  let rotateValue = 0;
-  function showRotate() {
-    $('rotate').querySelector('span').innerHTML = '&#8635; ' + rotateValue + '°';
-    $('rotate').dataset.on = rotateValue ? '1' : '0';
-    $('rotnote').style.display = rotateValue ? '' : 'none';
-  }
-  $('rotate').addEventListener('click', () => {
-    rotateValue = (rotateValue + 90) % 360;
-    showRotate();
-    sendOrient();
-    save();
-  });
-
   function syncEnabled() {
     $('keygroup').dataset.on = $('keyon').checked ? '1' : '0';
     $('thrrow').style.display = $('hard').checked ? '' : 'none';
@@ -584,7 +546,6 @@
       mirror: $('mirror').checked ? 1 : 0,
       flip: $('flip').checked ? 1 : 0,
       swap: $('swap').checked ? 1 : 0,
-      rotate: rotateValue,
       keyon: $('keyon').checked ? 1 : 0,
       keyrgb: parseInt($('custom').value.slice(1), 16),
       hard: $('hard').checked ? 1 : 0,
@@ -640,7 +601,6 @@
       mirror: $('mirror').checked ? 1 : 0,
       flip: $('flip').checked ? 1 : 0,
       swap: $('swap').checked ? 1 : 0,
-      rotate: rotateValue,
       keyon: $('keyon').checked ? 1 : 0,
       keyrgb: parseInt(hex.slice(1), 16),
       hard: $('hard').checked ? 1 : 0,
@@ -682,8 +642,6 @@
     $('mirror').checked = !!s.mirror;
     $('flip').checked = !!s.flip;
     $('swap').checked = !!s.swap;
-    rotateValue = [0, 90, 180, 270].includes(s.rotate) ? s.rotate : 0;
-    showRotate();
     $('keyon').checked = !!s.keyon;
     $('hard').checked = !!s.hard;
     $('thr').value = s.thr;

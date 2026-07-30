@@ -75,17 +75,11 @@ void SpoutPreview::SetRect(int x, int y, int w, int h, bool bShow)
 	SetWindowPos(m_hWnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
 }
 
-void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned int rotate)
+void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap)
 {
 	m_bMirror = bMirror;
 	m_bFlip   = bFlip;
 	m_bSwap   = bSwap;
-	m_Rotate  = (rotate == 90 || rotate == 180 || rotate == 270) ? rotate : 0;
-
-	// Force the next frame to resize, since a quarter turn changes the shape
-	m_bFrameValid = false;
-	m_PixWidth = 0;
-	m_PixHeight = 0;
 }
 
 bool SpoutPreview::ProbeSender(unsigned int& width, unsigned int& height)
@@ -126,15 +120,9 @@ bool SpoutPreview::GrabFrame()
 	if (!m_bDXok)
 		return false;
 
-	const bool bQuarter = (m_Rotate == 90 || m_Rotate == 270);
-
-	// Fit the sender inside the panel, keeping its shape. A quarter turn
-	// swaps what the viewer ends up seeing, so fit the turned shape.
-	unsigned int sw = m_Receiver.GetSenderWidth();
-	unsigned int sh = m_Receiver.GetSenderHeight();
-	if (bQuarter) {
-		const unsigned int t = sw; sw = sh; sh = t;
-	}
+	// Fit the sender inside the panel, keeping its shape
+	const unsigned int sw = m_Receiver.GetSenderWidth();
+	const unsigned int sh = m_Receiver.GetSenderHeight();
 
 	int w = m_Width;
 	int h = m_Height;
@@ -144,13 +132,11 @@ bool SpoutPreview::GrabFrame()
 		h = max(1, (int)(sh*scale));
 	}
 
-	// Size received before the turn is applied
-	const int rw = bQuarter ? h : w;
-	const int rh = bQuarter ? w : h;
+	const int rw = w;
+	const int rh = h;
 
 	if (w != m_PixWidth || h != m_PixHeight) {
 		m_Pixels.assign((size_t)rw*rh*4, 0);
-		m_Rotated.assign((size_t)w*h*4, 0);
 		m_PixWidth = w;
 		m_PixHeight = h;
 		m_bFrameValid = false;
@@ -188,8 +174,8 @@ bool SpoutPreview::GrabFrame()
 		return false;
 	}
 
-	// Mirror in the received frame's own space, before any turn, so the two
-	// options combine the same way the filter combines them
+	// Mirrored here rather than by the receiver, which ignores the flag on the
+	// resampling path the panel always takes
 	if (m_bMirror) {
 		for (int y = 0; y < rh; y++) {
 			unsigned char* row = m_Pixels.data()+(size_t)y*rw*4;
@@ -203,10 +189,6 @@ bool SpoutPreview::GrabFrame()
 		}
 	}
 
-	if (m_Rotate != 0) {
-		m_Copy.RotateBuffer(m_Pixels.data(), m_Rotated.data(),
-			(unsigned int)rw, (unsigned int)rh, 4, m_Rotate);
-	}
 
 	// Composite over the key colour first, in the channel order the pixels
 	// arrived in, so the swap below carries the key with the image exactly as
@@ -220,7 +202,7 @@ bool SpoutPreview::GrabFrame()
 	// AlphaBlend, and note whether the sender uses alpha at all.
 	// The sender carries straight alpha, so the scaling here is needed.
 	bool bAlpha = false;
-	unsigned char* p = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
+	unsigned char* p = m_Pixels.data();
 	const size_t count = (size_t)w*h;
 	for (size_t i = 0; i < count; i++, p += 4) {
 
@@ -332,7 +314,7 @@ void SpoutPreview::Paint(HDC hdc)
 		bmi.bmiHeader.biBitCount    = 32;
 		bmi.bmiHeader.biCompression = BI_RGB;
 
-		const unsigned char* display = (m_Rotate != 0) ? m_Rotated.data() : m_Pixels.data();
+		const unsigned char* display = m_Pixels.data();
 		const size_t displaySize = (size_t)m_PixWidth*m_PixHeight*4;
 
 		HDC     src    = CreateCompatibleDC(mem);

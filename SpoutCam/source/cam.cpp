@@ -589,7 +589,6 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	g_Height		= 720;
 	m_NoSignalWidth  = 0;    // "no signal" frame is built on first use
 	m_NoSignalHeight = 0;
-	m_Rotate         = 0;    // replaced by the registry value below
 	g_SenderName[0] = 0;
 	g_ActiveSender[0] = 0;
 	g_SenderStart[0] = 0;
@@ -668,10 +667,6 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	g_SenderStart[0] = 0;
 	ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderstart", g_SenderStart);
 
-	// Rotation has to be known before SetResolution runs, because a quarter
-	// turn swaps the width and height the filter advertises
-	ReadRotationSetting();
-
 	// Orientation and key colour. These are re-read while running, so the
 	// same function does the first read.
 	RefreshLiveSettings();
@@ -747,28 +742,6 @@ void CVCamStream::SetFps(DWORD dwFps)
 //
 // Read the quarter turn applied to the output.
 //
-// Kept separate from the rest because it has to be known before the frame
-// size is worked out, and unlike the other options it cannot be changed while
-// running: 90 and 270 swap width and height, and the format is fixed once the
-// pins connect.
-//
-void CVCamStream::ReadRotationSetting()
-{
-	DWORD dwRotate = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "rotate", &dwRotate);
-
-	switch (dwRotate) {
-		case 90:
-		case 180:
-		case 270:
-			m_Rotate = (unsigned int)dwRotate;
-			break;
-		default:
-			m_Rotate = 0; // anything else is not a quarter turn
-			break;
-	}
-}
-
 //
 // Re-read the options that can be changed without renegotiating the format.
 //
@@ -911,17 +884,9 @@ void CVCamStream::SetResolution(DWORD dwResolution)
 			break;
 	}
 
-	// A quarter turn swaps what the filter advertises, which is how a
-	// landscape sender ends up as a portrait camera.
-	if (m_Rotate == 90 || m_Rotate == 270) {
-		const unsigned int swap = g_Width;
-		g_Width = g_Height;
-		g_Height = swap;
-	}
-
 	// RGB24 rows are padded to a DWORD. Keeping the width a multiple of 4
 	// makes the row length a multiple of 4 as well, so the sample buffer has
-	// no padding and the rotation below can treat it as tightly packed.
+	// no padding.
 	g_Width = (g_Width/4)*4;
 	if (g_Width == 0)
 		g_Width = 4;
@@ -1119,30 +1084,7 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	// ReceiveImage handles sender detection, connection and copy of pixels
 	// bRGB    : set true for the BGR pixel data (i.e. not RGBA/BGRA)
 	// bInvert : SpoutCamSettings or properites dialog user setting "flip"
-	//
-	// A rotated frame cannot be written over the one being read, so it goes
-	// via a scratch buffer. For a quarter turn the sender is received at the
-	// swapped size and turned into the sample afterwards.
-	//
-	unsigned char *dest = pData;
-	unsigned int recvWidth  = width;
-	unsigned int recvHeight = height;
-
-	if (m_Rotate != 0) {
-		if (m_Rotate == 90 || m_Rotate == 270) {
-			recvWidth  = height;
-			recvHeight = width;
-		}
-		const size_t needed = (size_t)recvWidth*recvHeight*3;
-		if (m_RotateBuffer.size() != needed)
-			m_RotateBuffer.assign(needed, 0);
-		dest = m_RotateBuffer.data();
-	}
-
-	if (receiver.ReceiveImage(dest, recvWidth, recvHeight, true, bInvert)) {
-
-		if (m_Rotate != 0)
-			m_Copy.RotateBuffer(m_RotateBuffer.data(), pData, recvWidth, recvHeight, 3, m_Rotate);
+	if (receiver.ReceiveImage(pData, width, height, true, bInvert)) {
 
 		if (receiver.IsUpdated()) {
 			// The sender has changed

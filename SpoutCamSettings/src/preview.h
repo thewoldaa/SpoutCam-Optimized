@@ -35,7 +35,7 @@ public:
 
 	// Follow the orientation controls as they are edited, so the preview
 	// shows what is being set rather than what was last saved.
-	void SetOrientation(bool bMirror, bool bFlip, bool bSwap, unsigned int rotate);
+	void SetOrientation(bool bMirror, bool bFlip, bool bSwap);
 
 	// Same for the key colour, so the preview shows what the camera will send
 	// rather than the checkerboard it uses to reveal alpha.
@@ -81,13 +81,9 @@ private:
 	int m_PixHeight = 0;
 	bool m_bFrameValid = false;
 
-	// Scratch for the turned frame. A rotation cannot be done in place.
-	std::vector<unsigned char> m_Rotated;
-
 	bool m_bMirror = false;
 	bool m_bFlip   = false;
 	bool m_bSwap   = false;
-	unsigned int m_Rotate = 0;
 
 	bool m_bKey = false;
 	unsigned char m_KeyR = 0, m_KeyG = 255, m_KeyB = 0;

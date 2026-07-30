@@ -205,7 +205,6 @@ public:
 	void BuildNoSignalImage(unsigned int width, unsigned int height);
 	void RefreshSenderResolution();
 	void RefreshLiveSettings();
-	void ReadRotationSetting();
 
 	// ============== IPC functions ==============
 	//
@@ -237,15 +236,6 @@ public:
 	// panel closed the filter stays connected but shows the idle frame.
 	bool m_bAppRunning;
 
-	// Quarter turn applied to the output: 0, 90, 180 or 270, clockwise.
-	// 90 and 270 swap the advertised width and height, which is how a
-	// landscape sender becomes a portrait camera.
-	unsigned int m_Rotate;
-
-	// Holds the unrotated frame. Only allocated when a rotation is in use,
-	// since without one the sender is written straight into the sample.
-	std::vector<unsigned char> m_RotateBuffer;
-	spoutCopy m_Copy;
 
 	DWORD dwFps;					// Fps from SpoutCamConfig
 	DWORD dwResolution;				// Resolution from SpoutCamConfig

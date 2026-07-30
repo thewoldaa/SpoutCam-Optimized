@@ -59,19 +59,18 @@ the second texture's benefit.
 `DecideBufferSize` asked for a single buffer, which made every frame wait for the
 downstream filter to release the previous one.
 
-### Rotation
-
-The output can be turned by a quarter, a half or three quarters. A quarter turn
-swaps the advertised width and height, which is how a landscape sender becomes a
-portrait camera for a vertical stream.
-
 ### Orientation changes apply while running
 
 Mirror, flip, swap and the key colour are re-read about once a second, so
 changing them in the settings program takes effect without the host having to
-disconnect and reconnect the camera. Frame rate, resolution and rotation all
-change the media type, and DirectShow fixes that when the pins connect, so those
-still need the camera source removed and added again.
+disconnect and reconnect the camera. Frame rate and resolution change the media
+type, and DirectShow fixes that when the pins connect, so those still need the
+camera source removed and added again.
+
+There is deliberately no rotation option. A quarter turn swaps the width and
+height the camera advertises, so it could never apply without that same
+disconnect, and every streaming program can already rotate a source in place.
+Doing it there is one click and takes effect immediately.
 
 ### No more static
 
@@ -94,11 +93,11 @@ tends to upset the program using it.
 The original settings program was never published in source form, so this is a new
 one. It builds to a single executable with no installer and no runtime DLL to ship.
 
-- Frame rate, resolution, sender lock, mirror / flip / swap, rotation
+- Frame rate, resolution, sender lock, mirror / flip / swap
 - Key colour: on/off, preset or custom colour, hard edge, edge threshold
 - Live preview over a checkerboard, so you can see at a glance whether a sender
-  actually carries alpha. It follows the orientation controls as they are
-  edited, so you can see a rotation before committing to it
+  actually carries alpha. It follows the orientation and key colour controls as
+  they are edited, so what is on screen is what the camera sends
 - Registers the filter through the elevation prompt
 - Settings are written as they are edited, so there is no Save button and nothing
   to lose by closing the window. Minimise puts it in the notification area

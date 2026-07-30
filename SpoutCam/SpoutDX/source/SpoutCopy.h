@@ -154,19 +154,6 @@ class SPOUT_DLLEXP spoutCopy {
 			unsigned char threshold = 128;
 		};
 
-		// Rotate a packed buffer by a quarter turn.
-		//
-		// Source and destination must not overlap. For 90 and 270 the
-		// destination is sourceHeight wide by sourceWidth tall, so the caller
-		// has to size it accordingly. Rows are assumed tightly packed, which is
-		// true of the RGB and RGBA buffers this is used with.
-		//
-		// degrees is 0, 90, 180 or 270, measured clockwise. Anything else
-		// copies straight through.
-		void RotateBuffer(const void* source, void* dest,
-			unsigned int sourceWidth, unsigned int sourceHeight,
-			unsigned int bytesPerPixel, unsigned int degrees) const;
-
 		// Copy RGBA to RGB or BGR allowing for source line pitch using the fastest method
 		void rgba2rgb (const void* rgba_source, void* rgb_dest, unsigned int width, unsigned int height,
 			unsigned int sourcePitch,    // byte line pitch

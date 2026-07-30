@@ -27,3 +27,4 @@ SpoutCamSettings/packages/
 # WebView2 browser profile. The program puts this under local app data now,
 # but an older build dropped it beside the executable.
 *.WebView2/
+*.ax.locked
