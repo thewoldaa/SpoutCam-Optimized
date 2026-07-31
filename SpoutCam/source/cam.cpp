@@ -690,8 +690,59 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	NumDroppedFrames = 0LL;
 	NumFrames = 0LL;
 
+	m_StatsTime = 0;
+	m_StatsFrames = 0LL;
 
 }
+
+
+//
+// Measure what the camera actually delivers and publish it for the settings
+// program, along with the sender's own rate.
+//
+// The fps setting only states an intention. DirectShow fixes it when the pins
+// connect, a sender running slower caps it anyway, and a machine that cannot
+// convert a frame inside the frame time silently produces fewer. All three
+// look identical from outside, so the number is worth measuring rather than
+// assuming.
+//
+// Two registry writes a second on the streaming thread. That is small next to
+// a frame, and small next to being unable to tell 60 from 30.
+//
+void CVCamStream::ReportRate()
+{
+	const DWORD now = timeGetTime();
+
+	if (m_StatsTime == 0) {
+		m_StatsTime = now;
+		m_StatsFrames = 0LL;
+		return;
+	}
+
+	m_StatsFrames++;
+
+	const DWORD elapsed = now - m_StatsTime;
+	if (elapsed < 1000)
+		return;
+
+	// Tenths of a frame per second. One decimal place separates 30 from 29.97
+	// and still fits a DWORD, so the settings program needs no parsing.
+	const DWORD camfps = (DWORD)(((unsigned long long)m_StatsFrames*10000ULL + elapsed/2)/elapsed);
+	const DWORD senderfps = bInitialized ? (DWORD)(receiver.GetSenderFps()*10.0 + 0.5) : 0;
+
+	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "camfps", camfps);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderfps", senderfps);
+
+	// Nothing calls FillBuffer when no host has the camera open, so the two
+	// numbers above would otherwise sit there looking current forever. This is
+	// timeGetTime, which counts from boot, so the settings program can compare
+	// it against its own clock and know how old they are.
+	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "ratestamp", now);
+
+	m_StatsTime = now;
+	m_StatsFrames = 0LL;
+}
+
 
 void CVCamStream::SetFps(DWORD dwFps)
 {
@@ -955,6 +1006,10 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	// nobody changes a checkbox sixty times a second.
 	if ((NumFrames % 60) == 0)
 		RefreshLiveSettings();
+
+	// Counted here rather than at the returns, which are many and one of them
+	// is a goto target
+	ReportRate();
 
 	//
 	// Timing - modified from Red5 method

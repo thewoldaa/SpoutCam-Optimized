@@ -161,6 +161,17 @@
     padding-bottom: 8px;
   }
 
+  /* Measured rate, sitting under the control that only asks for one.
+     It reads as a caption for that row, so the rule between the two goes. */
+  .row:has(+ .rate) { border-bottom: none; }
+  .rate {
+    font: 11px var(--mono);
+    color: var(--dim);
+    padding: 0 var(--pad) 9px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .rate[data-warn="1"] { color: var(--tally); }
+
   /* ---------------- controls ---------------- */
 
   select, input[type=text] {
@@ -424,6 +435,8 @@
     </select>
   </div>
 
+  <div class="rate" id="rate">No program has the camera open</div>
+
   <div class="row">
     <label for="res">Resolution</label>
     <select id="res">
@@ -657,6 +670,12 @@
   window.setTally = (live, text) => {
     $('tally').dataset.live = live ? '1' : '0';
     $('tally-text').textContent = text;
+  };
+
+  window.setRate = (text, warn) => {
+    const el = $('rate');
+    el.textContent = text;
+    el.dataset.warn = warn ? '1' : '0';
   };
 
   /* ---- camera install state ----

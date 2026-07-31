@@ -72,6 +72,22 @@ height the camera advertises, so it could never apply without that same
 disconnect, and every streaming program can already rotate a source in place.
 Doing it there is one click and takes effect immediately.
 
+### The delivered frame rate is measured, not assumed
+
+The frame rate control states an intention. Three separate things can quietly
+overrule it, and from the outside they look identical.
+
+DirectShow fixes the rate when the pins connect, so changing the setting does
+nothing until the camera source is removed and added again. A sender running
+slower caps the rate no matter what the camera asks for. And a machine that
+cannot convert a frame inside the frame time simply produces fewer of them.
+
+The filter now counts what it actually delivers, reads the sender's own rate
+alongside it, and publishes both once a second. The settings program shows them
+under the frame rate control, and turns the line amber when the camera is more
+than ten percent below what was asked for. Guessing which of the three is
+happening was the hard part; reading two numbers is not.
+
 ### No more static
 
 With no sender running the output was random noise. It now reads "SpoutCam", drawn
@@ -93,7 +109,8 @@ tends to upset the program using it.
 The original settings program was never published in source form, so this is a new
 one. It builds to a single executable with no installer and no runtime DLL to ship.
 
-- Frame rate, resolution, sender lock, mirror / flip / swap
+- Frame rate, resolution, sender lock, mirror / flip / swap, with the rate the
+  camera is really delivering shown under the control that asks for it
 - Key colour: on/off, preset or custom colour, hard edge, edge threshold
 - Live preview over a checkerboard, so you can see at a glance whether a sender
   actually carries alpha. It follows the orientation and key colour controls as

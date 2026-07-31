@@ -236,6 +236,13 @@ public:
 	// panel closed the filter stays connected but shows the idle frame.
 	bool m_bAppRunning;
 
+	// Delivered frame rate, measured over the last second. The fps setting is
+	// what the camera asks for; this is what it manages, which is not the same
+	// thing when the sender is slower or the machine cannot keep up.
+	void ReportRate();
+	DWORD m_StatsTime;
+	long long m_StatsFrames;
+
 
 	DWORD dwFps;					// Fps from SpoutCamConfig
 	DWORD dwResolution;				// Resolution from SpoutCamConfig

@@ -412,9 +412,25 @@ static bool CopyOver(const std::wstring& src, const std::wstring& dst)
 	if (CopyFileW(src.c_str(), dst.c_str(), FALSE))
 		return true;
 
-	const std::wstring stale = dst + L".old";
-	DeleteFileW(stale.c_str()); // may itself still be held, which is fine
-	if (!MoveFileExW(dst.c_str(), stale.c_str(), MOVEFILE_REPLACE_EXISTING))
+	// A fixed name would collide with the leftover from a previous install
+	// that something is still holding, and renaming onto a held file fails
+	// just as writing over one does. Count up until a free name turns up.
+	std::wstring stale;
+	for (int n = 0; n < 100; n++) {
+		wchar_t suffix[16];
+		swprintf_s(suffix, L".old%d", n);
+		stale = dst + suffix;
+		if (GetFileAttributesW(stale.c_str()) == INVALID_FILE_ATTRIBUTES)
+			break;
+		DeleteFileW(stale.c_str()); // gone if nothing holds it, in use if not
+		if (GetFileAttributesW(stale.c_str()) == INVALID_FILE_ATTRIBUTES)
+			break;
+		stale.clear();
+	}
+	if (stale.empty())
+		return false;
+
+	if (!MoveFileExW(dst.c_str(), stale.c_str(), 0))
 		return false;
 
 	// Cleared on the next restart, by which point nothing is holding it
@@ -566,14 +582,17 @@ static int DoUninstall()
 
 	// Left by a reinstall that had to rename a loaded filter out of the way.
 	// Still held, most likely, so schedule it rather than expecting it to go.
-	const wchar_t* stale[] = { L"\\SpoutCam64.ax.old", L"\\SpoutCam32.ax.old" };
-	for (const wchar_t* s : stale) {
-		const std::wstring path = filter + s;
-		if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
-			continue;
-		SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
-		if (!DeleteFileW(path.c_str()))
-			MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+	// They are numbered, and there may be several, so match rather than guess
+	WIN32_FIND_DATAW found = {};
+	HANDLE search = FindFirstFileW((filter + L"\\*.ax.old*").c_str(), &found);
+	if (search != INVALID_HANDLE_VALUE) {
+		do {
+			const std::wstring path = filter + L"\\" + found.cFileName;
+			SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+			if (!DeleteFileW(path.c_str()))
+				MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+		} while (FindNextFileW(search, &found));
+		FindClose(search);
 	}
 
 	RemoveDirectoryW(filter.c_str());
@@ -858,6 +877,66 @@ static void UpdateTally()
 	g_webview->ExecuteScript(script, nullptr);
 }
 
+//
+// What the camera is actually managing, next to the setting that asked for it.
+//
+// The frame rate control states an intention and nothing more. DirectShow
+// fixes the rate when the pins connect, so a change needs the source removed
+// and added again; a sender running slower caps it regardless; and a machine
+// that cannot convert a frame inside the frame time quietly produces fewer.
+// All three look the same from the outside, which is why this is measured.
+//
+static std::wstring g_lastRate;
+
+static void UpdateRate()
+{
+	if (!g_webview || !g_bReadyForScript)
+		return;
+
+	// Index of the frame rate control, in the order the page lists them
+	static const int kFpsChoices[] = { 10, 15, 25, 30, 50, 60 };
+	const DWORD sel = ReadDword(L"fps", 3);
+	const int wanted = kFpsChoices[sel < 6 ? sel : 3];
+
+	const DWORD stamp = ReadDword(L"ratestamp", 0);
+	const DWORD camfps = ReadDword(L"camfps", 0);     // tenths
+	const DWORD senderfps = ReadDword(L"senderfps", 0); // tenths
+
+	std::wstring text;
+	bool warn = false;
+
+	// The filter only writes these while a host has the camera open, so a
+	// stale stamp means nothing is running rather than nothing is arriving.
+	// GetTickCount rather than timeGetTime only to avoid pulling in winmm for
+	// one call. Both count milliseconds since boot and agree far more closely
+	// than the three seconds being tested for.
+	if (stamp == 0 || (GetTickCount() - stamp) > 3000) {
+		text = L"No program has the camera open";
+	}
+	else {
+		wchar_t buf[160];
+		if (senderfps > 0)
+			swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps",
+				senderfps/10.0, camfps/10.0);
+		else
+			swprintf_s(buf, L"Camera %.1f fps \x2022 no sender", camfps/10.0);
+		text = buf;
+
+		// A tenth of a frame either way is measurement noise. Ten percent down
+		// is not, and it is the case worth pointing at.
+		warn = (camfps < (DWORD)(wanted*9));
+	}
+
+	if (text == g_lastRate)
+		return;
+	g_lastRate = text;
+
+	wchar_t script[320];
+	swprintf_s(script, L"window.setRate(\"%s\",%s);",
+		text.c_str(), warn ? L"true" : L"false");
+	g_webview->ExecuteScript(script, nullptr);
+}
+
 // ---------------------------------------------------------------- webview
 
 static std::wstring LoadHtmlResource()
@@ -1041,6 +1120,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 		if (wp == kTimerId && IsWindowVisible(hWnd)) {
 			g_preview.Tick();
 			UpdateTally();
+			UpdateRate();
 		}
 		return 0;
 
