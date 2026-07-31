@@ -728,7 +728,13 @@ void CVCamStream::ReportRate()
 	// Tenths of a frame per second. One decimal place separates 30 from 29.97
 	// and still fits a DWORD, so the settings program needs no parsing.
 	const DWORD camfps = (DWORD)(((unsigned long long)m_StatsFrames*10000ULL + elapsed/2)/elapsed);
-	const DWORD senderfps = bInitialized ? (DWORD)(receiver.GetSenderFps()*10.0 + 0.5) : 0;
+	// GetSenderFps starts life holding the monitor refresh rate and only stops
+	// holding it once Spout is counting frames, which is off unless someone
+	// turned it on. Publishing the default would be publishing the monitor.
+	DWORD counting = 0;
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\Spout", "Framecount", &counting);
+	const DWORD senderfps = (bInitialized && counting == 1)
+		? (DWORD)(receiver.GetSenderFps()*10.0 + 0.5) : 0;
 
 	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "camfps", camfps);
 	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderfps", senderfps);

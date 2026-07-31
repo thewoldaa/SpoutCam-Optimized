@@ -88,6 +88,14 @@ under the frame rate control, and turns the line amber when the camera is more
 than ten percent below what was asked for. Guessing which of the three is
 happening was the hard part; reading two numbers is not.
 
+The sender rate needs Spout's frame counting turned on, which it is not by
+default. With it off, `GetSenderFps` hands back the monitor refresh rate, which
+it takes as a starting value and never replaces. That is a plausible number
+with nothing behind it, so the line says frame counting is off instead of
+repeating it. Turn it on in SpoutSettings, or set `Framecount` to 1 under
+`HKCU\Software\Leading Edge\Spout`. The camera's own rate is measured here and
+needs none of that.
+
 ### No more static
 
 With no sender running the output was random noise. It now reads "SpoutCam", drawn

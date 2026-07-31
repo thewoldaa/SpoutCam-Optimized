@@ -920,24 +920,27 @@ static void UpdateRate()
 	// than the three seconds being tested for.
 	const bool camlive = (stamp != 0 && (GetTickCount() - stamp) <= 3000);
 
-	if (!camlive && sender > 0.0) {
-		swprintf_s(buf, L"Sender %.1f fps \x2022 no program has the camera open", sender);
-		text = buf;
-	}
-	else if (!camlive) {
-		text = L"No program has the camera open";
-	}
-	else {
-		if (sender > 0.0)
-			swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps", sender, camfps/10.0);
-		else
-			swprintf_s(buf, L"Camera %.1f fps \x2022 no sender", camfps/10.0);
-		text = buf;
+	// Kept short deliberately. The window is narrow and this line has to say
+	// something true in every combination rather than something long in one.
+	const wchar_t* nocam = L"no camera open";
+	const wchar_t* nofps = SpoutFrameCountEnabled() ? L"no sender"
+	                                                : L"Spout frame counting off";
 
-		// A tenth of a frame either way is measurement noise. Ten percent down
-		// is not, and it is the case worth pointing at.
+	if (sender > 0.0 && camlive)
+		swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps", sender, camfps/10.0);
+	else if (sender > 0.0)
+		swprintf_s(buf, L"Sender %.1f fps \x2022 %s", sender, nocam);
+	else if (camlive)
+		swprintf_s(buf, L"Camera %.1f fps \x2022 %s", camfps/10.0, nofps);
+	else
+		swprintf_s(buf, L"No camera open \x2022 %s", nofps);
+	text = buf;
+
+	// A tenth of a frame either way is measurement noise. Ten percent down is
+	// not, and it is the case worth pointing at. Only meaningful while a host
+	// is actually pulling frames.
+	if (camlive)
 		warn = (camfps < (DWORD)(wanted*9));
-	}
 
 	if (text == g_lastRate)
 		return;

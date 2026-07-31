@@ -17,6 +17,11 @@
 #include <vector>
 #include "..\..\SpoutCam\SpoutDX\source\SpoutDX.h"
 
+// Whether Spout counts frames between senders and receivers. Off by default,
+// and with it off no sender rate can be had from anywhere: the SDK hands back
+// the monitor refresh rate instead, which looks like an answer and is not one.
+bool SpoutFrameCountEnabled();
+
 class SpoutPreview
 {
 public:
@@ -47,10 +52,10 @@ public:
 	// the sender's shared memory description only, no texture and no DirectX.
 	bool ProbeSender(unsigned int& width, unsigned int& height);
 
-	// The sender's own frame rate, or zero when the preview is not connected
-	// and there is nothing counting frames to ask. Worth having separately from
-	// the filter's copy, because this one answers before any streaming program
-	// has opened the camera.
+	// The sender's own frame rate, or zero when there is nothing to ask: the
+	// preview is collapsed, or Spout is not counting frames at all. Worth
+	// having separately from the filter's copy, because this one answers
+	// before any streaming program has opened the camera.
 	double SenderFps();
 
 	bool IsVisible()   const { return m_bShow; }
