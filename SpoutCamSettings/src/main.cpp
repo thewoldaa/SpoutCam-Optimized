@@ -900,24 +900,36 @@ static void UpdateRate()
 
 	const DWORD stamp = ReadDword(L"ratestamp", 0);
 	const DWORD camfps = ReadDword(L"camfps", 0);     // tenths
-	const DWORD senderfps = ReadDword(L"senderfps", 0); // tenths
+
+	// The sender's rate from this program's own receiver where it can be had,
+	// falling back to the filter's reading. Preferring the local one means the
+	// sender can be checked before any streaming program is even started,
+	// which is when it is most worth knowing.
+	double sender = g_preview.SenderFps();
+	if (sender <= 0.0)
+		sender = ReadDword(L"senderfps", 0)/10.0;
 
 	std::wstring text;
 	bool warn = false;
+	wchar_t buf[160];
 
-	// The filter only writes these while a host has the camera open, so a
-	// stale stamp means nothing is running rather than nothing is arriving.
+	// The filter only writes its numbers while a host has the camera open, so
+	// a stale stamp means nothing is running rather than nothing is arriving.
 	// GetTickCount rather than timeGetTime only to avoid pulling in winmm for
 	// one call. Both count milliseconds since boot and agree far more closely
 	// than the three seconds being tested for.
-	if (stamp == 0 || (GetTickCount() - stamp) > 3000) {
+	const bool camlive = (stamp != 0 && (GetTickCount() - stamp) <= 3000);
+
+	if (!camlive && sender > 0.0) {
+		swprintf_s(buf, L"Sender %.1f fps \x2022 no program has the camera open", sender);
+		text = buf;
+	}
+	else if (!camlive) {
 		text = L"No program has the camera open";
 	}
 	else {
-		wchar_t buf[160];
-		if (senderfps > 0)
-			swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps",
-				senderfps/10.0, camfps/10.0);
+		if (sender > 0.0)
+			swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps", sender, camfps/10.0);
 		else
 			swprintf_s(buf, L"Camera %.1f fps \x2022 no sender", camfps/10.0);
 		text = buf;

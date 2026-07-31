@@ -82,6 +82,15 @@ void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap)
 	m_bSwap   = bSwap;
 }
 
+double SpoutPreview::SenderFps()
+{
+	// The rate comes off the sender's frame counter, which only ticks while
+	// this receiver is connected to it. Collapsing the preview disconnects,
+	// and then there is nothing here to count.
+	return m_bConnected ? m_Receiver.GetSenderFps() : 0.0;
+}
+
+
 bool SpoutPreview::ProbeSender(unsigned int& width, unsigned int& height)
 {
 	char name[256] = {};

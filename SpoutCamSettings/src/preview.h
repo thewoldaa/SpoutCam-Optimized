@@ -47,6 +47,12 @@ public:
 	// the sender's shared memory description only, no texture and no DirectX.
 	bool ProbeSender(unsigned int& width, unsigned int& height);
 
+	// The sender's own frame rate, or zero when the preview is not connected
+	// and there is nothing counting frames to ask. Worth having separately from
+	// the filter's copy, because this one answers before any streaming program
+	// has opened the camera.
+	double SenderFps();
+
 	bool IsVisible()   const { return m_bShow; }
 	bool IsConnected() const { return m_bConnected; }
 	bool HasAlpha()    const { return m_bHasAlpha; }
