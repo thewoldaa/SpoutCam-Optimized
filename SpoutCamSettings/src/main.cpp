@@ -20,6 +20,7 @@
 #include "WebView2.h"
 #include "preview.h"
 #include "resource.h"
+#include "..\..\SpoutCam\source\raterelay.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -48,6 +49,12 @@ static HWND  g_hMain = nullptr;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2>           g_webview;
 static SpoutPreview g_preview;
+
+// Where the camera reports what it is delivering. Created here because the
+// camera cannot create it: it runs inside programs that are not always allowed
+// to make objects other processes can find.
+static HANDLE g_hRateMap = nullptr;
+static SpoutCamRate* g_pRate = nullptr;
 static bool g_bReadyForScript = false;
 static std::wstring g_lastTally;
 
@@ -898,26 +905,25 @@ static void UpdateRate()
 	const DWORD sel = ReadDword(L"fps", 3);
 	const int wanted = kFpsChoices[sel < 6 ? sel : 3];
 
-	const DWORD stamp = ReadDword(L"ratestamp", 0);
-	const DWORD camfps = ReadDword(L"camfps", 0);     // tenths
+	const bool written = (g_pRate && g_pRate->magic == kRateMagic);
+	const DWORD stamp = written ? g_pRate->tick : 0;
+	const DWORD camfps = written ? g_pRate->camfps : 0; // tenths
 
 	// The sender's rate from this program's own receiver where it can be had,
-	// falling back to the filter's reading. Preferring the local one means the
+	// falling back to the camera's reading. Preferring the local one means the
 	// sender can be checked before any streaming program is even started,
 	// which is when it is most worth knowing.
 	double sender = g_preview.SenderFps();
-	if (sender <= 0.0)
-		sender = ReadDword(L"senderfps", 0)/10.0;
+	if (sender <= 0.0 && written)
+		sender = g_pRate->senderfps/10.0;
 
 	std::wstring text;
 	bool warn = false;
 	wchar_t buf[160];
 
-	// The filter only writes its numbers while a host has the camera open, so
-	// a stale stamp means nothing is running rather than nothing is arriving.
-	// GetTickCount rather than timeGetTime only to avoid pulling in winmm for
-	// one call. Both count milliseconds since boot and agree far more closely
-	// than the three seconds being tested for.
+	// The camera only writes while a host has it open, so a stale stamp means
+	// nothing is running rather than nothing is arriving. Both sides stamp with
+	// GetTickCount, which counts from boot, so the comparison is direct.
 	const bool camlive = (stamp != 0 && (GetTickCount() - stamp) <= 3000);
 
 	// Kept short deliberately. The window is narrow and this line has to say
@@ -1209,6 +1215,10 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int)
 		return 0;
 	}
 
+	// Held for the same lifetime, and after the single instance check so a
+	// second copy that bows out does not disturb the first one's mapping.
+	g_hRateMap = CreateRateMap(&g_pRate);
+
 	if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)))
 		return 1;
 
@@ -1252,6 +1262,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR lpCmdLine, int)
 	}
 
 	CoUninitialize();
+	CloseRateMap(g_hRateMap, g_pRate);
 	if (g_hRunEvent) CloseHandle(g_hRunEvent);
 	return 0;
 }

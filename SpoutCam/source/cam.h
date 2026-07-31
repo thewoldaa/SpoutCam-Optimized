@@ -31,6 +31,7 @@
 #include <streams.h>
 #include <vector>
 #include "..\SpoutDX\source\SpoutDX.h"
+#include "raterelay.h"
 
 //<==================== VS-START ====================>
 #include "dshowutil.h"
@@ -242,6 +243,8 @@ public:
 	void ReportRate();
 	DWORD m_StatsTime;
 	long long m_StatsFrames;
+	HANDLE m_hRateMap;
+	SpoutCamRate* m_pRate;
 
 
 	DWORD dwFps;					// Fps from SpoutCamConfig

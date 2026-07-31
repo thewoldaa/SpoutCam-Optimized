@@ -88,6 +88,13 @@ under the frame rate control, and turns the line amber when the camera is more
 than ten percent below what was asked for. Guessing which of the three is
 happening was the hard part; reading two numbers is not.
 
+The camera reports through shared memory rather than the registry. It runs
+inside whichever program opened it, and streaming software tends to put its
+capture in a low integrity process, where opening a named object succeeds but
+writing to `HKEY_CURRENT_USER` is refused. Shared memory carrying a low
+mandatory label gets through, which is the same reason the filter can receive
+Spout textures from in there in the first place.
+
 The sender rate needs Spout's frame counting turned on, which it is not by
 default. With it off, `GetSenderFps` hands back the monitor refresh rate, which
 it takes as a starting value and never replaces. That is a plausible number

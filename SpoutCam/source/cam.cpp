@@ -692,6 +692,8 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 
 	m_StatsTime = 0;
 	m_StatsFrames = 0LL;
+	m_hRateMap = nullptr;
+	m_pRate = nullptr;
 
 }
 
@@ -706,8 +708,9 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 // look identical from outside, so the number is worth measuring rather than
 // assuming.
 //
-// Two registry writes a second on the streaming thread. That is small next to
-// a frame, and small next to being unable to tell 60 from 30.
+// Published through shared memory rather than the registry, because this code
+// runs inside whoever opened the camera and that is often a process not allowed
+// to write to HKEY_CURRENT_USER. See raterelay.h.
 //
 void CVCamStream::ReportRate()
 {
@@ -736,14 +739,21 @@ void CVCamStream::ReportRate()
 	const DWORD senderfps = (bInitialized && counting == 1)
 		? (DWORD)(receiver.GetSenderFps()*10.0 + 0.5) : 0;
 
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "camfps", camfps);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderfps", senderfps);
+	// The settings program owns the mapping, so this fails while it is closed.
+	// That is the same condition under which the camera is idle anyway.
+	if (!m_pRate)
+		m_hRateMap = OpenRateMap(&m_pRate);
 
-	// Nothing calls FillBuffer when no host has the camera open, so the two
-	// numbers above would otherwise sit there looking current forever. This is
-	// timeGetTime, which counts from boot, so the settings program can compare
-	// it against its own clock and know how old they are.
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "ratestamp", now);
+	if (m_pRate) {
+		m_pRate->camfps = camfps;
+		m_pRate->senderfps = senderfps;
+		// Nothing calls FillBuffer when no host has the camera open, so the
+		// numbers would otherwise sit there looking current forever. GetTickCount
+		// counts from boot, so the reader can compare it against its own clock
+		// and know how old they are.
+		m_pRate->tick = GetTickCount();
+		m_pRate->magic = kRateMagic;
+	}
 
 	m_StatsTime = now;
 	m_StatsFrames = 0LL;
@@ -957,10 +967,12 @@ CVCamStream::~CVCamStream()
 	if (bDXinitialized)
 		receiver.CloseDirectX11();
 
+	CloseRateMap(m_hRateMap, m_pRate);
+
 	// End timer precision
 	timeEndPeriod(g_caps.wPeriodMin);
 
-} 
+}
 
 HRESULT CVCamStream::QueryInterface(REFIID riid, void **ppv)
 {  
