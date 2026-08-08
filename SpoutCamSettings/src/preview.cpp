@@ -82,35 +82,6 @@ void SpoutPreview::SetOrientation(bool bMirror, bool bFlip, bool bSwap)
 	m_bSwap   = bSwap;
 }
 
-//
-// Whether Spout is counting frames between senders and receivers at all.
-//
-// This matters more than it looks. With counting off, GetSenderFps returns the
-// monitor refresh rate, which it adopted as a default and never replaces. That
-// is a plausible looking number with nothing behind it, and reporting it as a
-// sender rate would be worse than reporting nothing.
-//
-bool SpoutFrameCountEnabled()
-{
-	DWORD dw = 0;
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\Spout", "Framecount", &dw))
-		return false;
-	return dw == 1;
-}
-
-
-double SpoutPreview::SenderFps()
-{
-	if (!SpoutFrameCountEnabled())
-		return 0.0;
-
-	// The rate comes off the sender's frame counter, which only ticks while
-	// this receiver is connected to it. Collapsing the preview disconnects,
-	// and then there is nothing here to count.
-	return m_bConnected ? m_Receiver.GetSenderFps() : 0.0;
-}
-
-
 bool SpoutPreview::ProbeSender(unsigned int& width, unsigned int& height)
 {
 	char name[256] = {};

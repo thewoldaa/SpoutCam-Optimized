@@ -893,6 +893,12 @@ static void UpdateTally()
 // that cannot convert a frame inside the frame time quietly produces fewer.
 // All three look the same from the outside, which is why this is measured.
 //
+// The sender's own rate used to sit alongside it and no longer does. Spout can
+// only report that when its frame counting is switched on, which it is not by
+// default, and with it off the SDK returns the monitor refresh rate. A number
+// that is usually absent and occasionally a lie is not worth the line it sits
+// on. SpoutSettings shows it for anyone who has turned counting on.
+//
 static std::wstring g_lastRate;
 
 static void UpdateRate()
@@ -909,14 +915,6 @@ static void UpdateRate()
 	const DWORD stamp = written ? g_pRate->tick : 0;
 	const DWORD camfps = written ? g_pRate->camfps : 0; // tenths
 
-	// The sender's rate from this program's own receiver where it can be had,
-	// falling back to the camera's reading. Preferring the local one means the
-	// sender can be checked before any streaming program is even started,
-	// which is when it is most worth knowing.
-	double sender = g_preview.SenderFps();
-	if (sender <= 0.0 && written)
-		sender = g_pRate->senderfps/10.0;
-
 	std::wstring text;
 	bool warn = false;
 	wchar_t buf[160];
@@ -926,20 +924,10 @@ static void UpdateRate()
 	// GetTickCount, which counts from boot, so the comparison is direct.
 	const bool camlive = (stamp != 0 && (GetTickCount() - stamp) <= 3000);
 
-	// Kept short deliberately. The window is narrow and this line has to say
-	// something true in every combination rather than something long in one.
-	const wchar_t* nocam = L"no camera open";
-	const wchar_t* nofps = SpoutFrameCountEnabled() ? L"no sender"
-	                                                : L"Spout frame counting off";
-
-	if (sender > 0.0 && camlive)
-		swprintf_s(buf, L"Sender %.1f fps \x2022 camera %.1f fps", sender, camfps/10.0);
-	else if (sender > 0.0)
-		swprintf_s(buf, L"Sender %.1f fps \x2022 %s", sender, nocam);
-	else if (camlive)
-		swprintf_s(buf, L"Camera %.1f fps \x2022 %s", camfps/10.0, nofps);
+	if (camlive)
+		swprintf_s(buf, L"Camera delivering %.1f fps", camfps/10.0);
 	else
-		swprintf_s(buf, L"No camera open \x2022 %s", nofps);
+		swprintf_s(buf, L"No program has the camera open");
 	text = buf;
 
 	// A tenth of a frame either way is measurement noise. Ten percent down is

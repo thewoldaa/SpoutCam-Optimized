@@ -34,9 +34,9 @@ static const DWORD kRateMagic = 0x53437231; // 'SCr1'
 
 struct SpoutCamRate {
 	DWORD magic;
-	DWORD camfps;    // tenths of a frame per second, as delivered
-	DWORD senderfps; // tenths, zero when Spout is not counting frames
-	DWORD tick;      // GetTickCount when this was written
+	DWORD camfps;  // tenths of a frame per second, as delivered
+	DWORD tick;    // GetTickCount when this was written
+	DWORD spare;   // keeps the block a round sixteen bytes
 };
 
 //

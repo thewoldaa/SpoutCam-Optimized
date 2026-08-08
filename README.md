@@ -82,11 +82,15 @@ nothing until the camera source is removed and added again. A sender running
 slower caps the rate no matter what the camera asks for. And a machine that
 cannot convert a frame inside the frame time simply produces fewer of them.
 
-The filter now counts what it actually delivers, reads the sender's own rate
-alongside it, and publishes both once a second. The settings program shows them
-under the frame rate control, and turns the line amber when the camera is more
-than ten percent below what was asked for. Guessing which of the three is
-happening was the hard part; reading two numbers is not.
+The filter now counts what it actually delivers and publishes it once a second.
+The settings program shows it under the frame rate control and turns the line
+amber when the camera is more than ten percent below what was asked for.
+
+The sender's own rate is deliberately not shown. Spout can only report that with
+its frame counting switched on, which it is not by default, and with it off the
+SDK returns the monitor refresh rate as a placeholder. A number that is usually
+absent and occasionally a lie is worse than no number. SpoutSettings shows it
+for anyone who has turned counting on.
 
 The camera reports through shared memory rather than the registry. It runs
 inside whichever program opened it, and streaming software tends to put its
@@ -94,14 +98,6 @@ capture in a low integrity process, where opening a named object succeeds but
 writing to `HKEY_CURRENT_USER` is refused. Shared memory carrying a low
 mandatory label gets through, which is the same reason the filter can receive
 Spout textures from in there in the first place.
-
-The sender rate needs Spout's frame counting turned on, which it is not by
-default. With it off, `GetSenderFps` hands back the monitor refresh rate, which
-it takes as a starting value and never replaces. That is a plausible number
-with nothing behind it, so the line says frame counting is off instead of
-repeating it. Turn it on in SpoutSettings, or set `Framecount` to 1 under
-`HKCU\Software\Leading Edge\Spout`. The camera's own rate is measured here and
-needs none of that.
 
 ### No more static
 

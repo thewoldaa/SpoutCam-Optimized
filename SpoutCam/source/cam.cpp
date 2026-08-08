@@ -700,7 +700,7 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 
 //
 // Measure what the camera actually delivers and publish it for the settings
-// program, along with the sender's own rate.
+// program.
 //
 // The fps setting only states an intention. DirectShow fixes it when the pins
 // connect, a sender running slower caps it anyway, and a machine that cannot
@@ -731,13 +731,6 @@ void CVCamStream::ReportRate()
 	// Tenths of a frame per second. One decimal place separates 30 from 29.97
 	// and still fits a DWORD, so the settings program needs no parsing.
 	const DWORD camfps = (DWORD)(((unsigned long long)m_StatsFrames*10000ULL + elapsed/2)/elapsed);
-	// GetSenderFps starts life holding the monitor refresh rate and only stops
-	// holding it once Spout is counting frames, which is off unless someone
-	// turned it on. Publishing the default would be publishing the monitor.
-	DWORD counting = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\Spout", "Framecount", &counting);
-	const DWORD senderfps = (bInitialized && counting == 1)
-		? (DWORD)(receiver.GetSenderFps()*10.0 + 0.5) : 0;
 
 	// The settings program owns the mapping, so this fails while it is closed.
 	// That is the same condition under which the camera is idle anyway.
@@ -746,7 +739,6 @@ void CVCamStream::ReportRate()
 
 	if (m_pRate) {
 		m_pRate->camfps = camfps;
-		m_pRate->senderfps = senderfps;
 		// Nothing calls FillBuffer when no host has the camera open, so the
 		// numbers would otherwise sit there looking current forever. GetTickCount
 		// counts from boot, so the reader can compare it against its own clock
