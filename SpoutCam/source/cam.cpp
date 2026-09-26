@@ -549,6 +549,13 @@ HRESULT CVCamStream::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirro
 	// were changed by its Properties dialog, then rendering SpoutCam's output pin works fine and all filters are successfully reconnected,
 	// taking into account the new fps/resolution settings.
 
+	// The property page calls this from its own thread, not the streaming
+	// thread. Everything below touches state FillBuffer reads - the size
+	// globals, the frame time, the orientation flag, and m_mt itself, which
+	// GetMediaType at the end can reallocate. Without the lock FillBuffer can
+	// be left reading a format buffer that was just freed.
+	CAutoLock cSettingsLock(&m_cSharedState);
+
 	// Fps and resolution
 	// Keep the choices so RefreshSenderResolution knows whether the user
 	// asked to follow the active sender or pinned a fixed size
@@ -694,6 +701,7 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	m_StatsFrames = 0LL;
 	m_hRateMap = nullptr;
 	m_pRate = nullptr;
+	m_LiveTick = 0;
 
 }
 
@@ -881,7 +889,7 @@ void CVCamStream::SetResolution(DWORD dwResolution)
 				// Use the resolution of the active sender if one is running
 				if (receiver.GetActiveSender(g_SenderName))
 				{
-					unsigned int width, height = 0;
+					unsigned int width = 0, height = 0;
 					HANDLE sharehandle = nullptr;
 					DWORD format = 0;
 					if (receiver.GetSenderInfo(g_SenderName, width, height, sharehandle, format))
@@ -999,7 +1007,22 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	HRESULT hr = S_OK;
 	BYTE * pData = nullptr;
 
-	VIDEOINFOHEADER * pvi = (VIDEOINFOHEADER *)m_mt.Format();
+	// Take the frame size out of the media type under the settings lock.
+	//
+	// put_Settings runs on the property page thread and its final GetMediaType
+	// reallocates the format buffer m_mt owns. Holding a pointer into that
+	// buffer for the rest of this function would leave the copy reading freed
+	// memory. The three values needed are copied here instead.
+	LONG imgWidth = 0, imgHeight = 0, imgSize = 0;
+	{
+		CAutoLock cSettingsLock(&m_cSharedState);
+		VIDEOINFOHEADER * pvi = (VIDEOINFOHEADER *)m_mt.Format();
+		if (pvi) {
+			imgWidth  = pvi->bmiHeader.biWidth;
+			imgHeight = pvi->bmiHeader.biHeight;
+			imgSize   = pvi->bmiHeader.biSizeImage;
+		}
+	}
 
 	// If graph is inactive stop cueing samples
 	if (!m_pParent->IsActive()) {
@@ -1014,8 +1037,15 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 	// Pick up option changes so the settings program takes effect without the
 	// host reconnecting. About once a second - these are registry reads, and
 	// nobody changes a checkbox sixty times a second.
-	if ((NumFrames % 60) == 0)
+	//
+	// Timed rather than counted in frames. Counting meant the interval was
+	// whatever sixty frames happened to be, so at 10 fps a checkbox took six
+	// seconds to register and at 60 fps it took one.
+	const DWORD nowTick = timeGetTime();
+	if (m_LiveTick == 0 || (nowTick - m_LiveTick) >= 1000) {
+		m_LiveTick = nowTick;
 		RefreshLiveSettings();
+	}
 
 	// Counted here rather than at the returns, which are many and one of them
 	// is a goto target
@@ -1093,10 +1123,12 @@ HRESULT CVCamStream::FillBuffer(IMediaSample * pms) {
 		return NOERROR;
 	}
 
-	// Get the current frame size for texture transfers
-    imagesize = (unsigned int)pvi->bmiHeader.biSizeImage;
-	width     = (unsigned int)pvi->bmiHeader.biWidth;
-	height    = (unsigned int)pvi->bmiHeader.biHeight;
+	// Get the current frame size for texture transfers.
+	// Copied from the media type under the lock at the top of the function -
+	// see the note there.
+	imagesize = (unsigned int)imgSize;
+	width     = (unsigned int)imgWidth;
+	height    = (unsigned int)imgHeight;
 	if (width == 0 || height == 0) {
 		return NOERROR;
 	}
@@ -1316,7 +1348,11 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 		return E_INVALIDARG;
 	}
 
-	if (iPosition > 1) {
+	// One position only, matching GetNumberOfCapabilities and the intent noted
+	// in the revision history. Both positions used to build the same media type
+	// from g_Width and g_Height, so the second was a duplicate that made some
+	// hosts ask twice and pick the copy.
+	if (iPosition > 0) {
 		return VFW_S_NO_MORE_ITEMS;
 	}
 

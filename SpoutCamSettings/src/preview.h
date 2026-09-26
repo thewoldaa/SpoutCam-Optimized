@@ -57,8 +57,42 @@ public:
 private:
 	static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 	void Paint(HDC hdc);
-	void DrawChecker(HDC hdc, int w, int h) const;
+	void DrawChecker(HDC hdc, int x0, int y0, int w, int h) const;
 	bool GrabFrame();
+
+	//
+	// GDI objects held between repaints.
+	//
+	// The preview repaints about thirty times a second, and the first version
+	// built every one of these inside Paint and destroyed them again on the way
+	// out - two device contexts, a compatible bitmap, a DIB section, three
+	// brushes and a font, so on the order of two hundred object creations a
+	// second for a picture that changes size only when the window does. They
+	// are made once per size and reused.
+	//
+	// ReleaseGdi drops them on a size change and in Destroy.
+	//
+	void ReleaseGdi();
+	void EnsureBackbuffer(HDC hdc, int cw, int ch);
+	void EnsureFrame(HDC hdc, int w, int h);
+
+	HDC     m_memDc   = nullptr;  // off screen composite, client sized
+	HBITMAP m_memBmp  = nullptr;
+	HGDIOBJ m_memOld  = nullptr;
+	int     m_memW    = 0;
+	int     m_memH    = 0;
+
+	HDC     m_srcDc   = nullptr;  // frame, at sender display size
+	HBITMAP m_srcBmp  = nullptr;
+	HGDIOBJ m_srcOld  = nullptr;
+	void*   m_srcBits = nullptr;  // the DIB's pixels, held from creation
+	int     m_srcW    = 0;
+	int     m_srcH    = 0;
+
+	HBRUSH m_brBack  = nullptr;
+	HBRUSH m_brCheckA = nullptr;
+	HBRUSH m_brCheckB = nullptr;
+	HFONT  m_fontWait = nullptr;
 
 	HWND  m_hWnd  = nullptr;
 	bool  m_bShow = false;

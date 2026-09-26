@@ -23,6 +23,7 @@
 
 #include <windows.h>
 #include <sddl.h>
+#include <string>
 
 // Session local, like the event the filter watches for the settings program.
 // Both sides are in the same session or neither mechanism would work at all.
@@ -46,19 +47,70 @@ struct SpoutCamRate {
 //
 inline HANDLE CreateRateMap(SpoutCamRate** ppView)
 {
-	// Everyone, plus app packages for anything running in a container, and a
-	// low label so a low integrity process is allowed to write. Lowering the
-	// label on an object we are creating needs no privilege.
-	SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, FALSE };
-	ConvertStringSecurityDescriptorToSecurityDescriptorW(
-		L"D:(A;;GA;;;WD)(A;;GA;;;AC)S:(ML;;NW;;;LW)",
-		SDDL_REVISION_1, &sa.lpSecurityDescriptor, nullptr);
+	//
+	// Who is allowed to touch this.
+	//
+	// The mapping carries the frame rate the camera is delivering, read from
+	// whatever process the host put the capture in. That process is often low
+	// integrity, so it has to be able to write, and the descriptor therefore
+	// cannot be the default one that only the creator can open.
+	//
+	// The first version granted generic all to Everyone, which is more than the
+	// job needs - any process on the machine could rewrite or clear a value the
+	// panel displays. The grant is now split: the logged on user gets the write
+	// the filter needs, Everyone is left with read only, which is enough for
+	// the panel to show the number and not enough for anything else to change
+	// it. App packages are included because a containerised host still has to
+	// report through this. The low mandatory label is what actually lets a low
+	// integrity process through; lowering the label on an object we are
+	// creating ourselves needs no privilege.
+	//
+	// The name is in the Local\ namespace, so it is per session and a process
+	// in another session cannot reach it at all.
+	//
+	HANDLE hMap = nullptr;
 
-	HANDLE hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
-		0, sizeof(SpoutCamRate), kRateMapName);
+	HANDLE hToken = nullptr;
+	BYTE   userSid[SECURITY_MAX_SID_SIZE] = {};
+	DWORD  sidSize = sizeof(userSid);
 
-	if (sa.lpSecurityDescriptor)
-		LocalFree(sa.lpSecurityDescriptor);
+	if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+		if (!GetTokenInformation(hToken, TokenUser, userSid, sidSize, &sidSize))
+			sidSize = 0;
+		CloseHandle(hToken);
+	}
+
+	if (sidSize > 0) {
+		LPWSTR sidString = nullptr;
+		if (ConvertSidToStringSidW((PSID)userSid, &sidString) && sidString) {
+			std::wstring sddl = L"D:(A;;GA;;;";
+			sddl += sidString;
+			sddl += L")(A;;GR;;;WD)(A;;GA;;;AC)S:(ML;;NW;;;LW)";
+			LocalFree(sidString);
+
+			SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, FALSE };
+			if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+					sddl.c_str(), SDDL_REVISION_1, &sa.lpSecurityDescriptor, nullptr)) {
+				hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+					0, sizeof(SpoutCamRate), kRateMapName);
+				LocalFree(sa.lpSecurityDescriptor);
+			}
+		}
+	}
+
+	if (!hMap) {
+		// Fall back to the permissive descriptor rather than leaving the panel
+		// without a rate line. A SID that will not convert is not a reason to
+		// lose the feature.
+		SECURITY_ATTRIBUTES sa = { sizeof(sa), nullptr, FALSE };
+		if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+				L"D:(A;;GA;;;WD)(A;;GA;;;AC)S:(ML;;NW;;;LW)",
+				SDDL_REVISION_1, &sa.lpSecurityDescriptor, nullptr)) {
+			hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+				0, sizeof(SpoutCamRate), kRateMapName);
+			LocalFree(sa.lpSecurityDescriptor);
+		}
+	}
 
 	if (!hMap)
 		return nullptr;

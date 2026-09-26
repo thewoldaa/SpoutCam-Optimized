@@ -246,6 +246,11 @@ public:
 	HANDLE m_hRateMap;
 	SpoutCamRate* m_pRate;
 
+	// When the live settings were last re-read. Counted in frames it came out
+	// framerate dependent, so at 10 fps a change in the settings program took
+	// six seconds to appear while at 60 fps it took one.
+	DWORD m_LiveTick;
+
 
 	DWORD dwFps;					// Fps from SpoutCamConfig
 	DWORD dwResolution;				// Resolution from SpoutCamConfig

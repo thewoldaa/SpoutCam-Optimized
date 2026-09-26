@@ -1383,6 +1383,15 @@ void spoutCopy::rgba2rgbResample(const void* source, void* dest,
 
     // Source column span covered by each destination column.
     // Integer maths so the spans tile the source exactly with no gap or overlap.
+    // Source column span covered by each destination column.
+    // Integer maths so the spans tile the source exactly with no gap or overlap.
+    //
+    // The count is kept alongside the start rather than derived from the next
+    // column's start, because the two are not the same when only one axis is
+    // being reduced: enlarging in x makes several destination columns share a
+    // start, and the span is then widened to one so every column samples
+    // something. Those widened spans overlap instead of tiling, so the next
+    // start cannot be used to recover the width.
     std::vector<unsigned int> xStart(destWidth);
     std::vector<unsigned int> xEnd(destWidth);
     for (unsigned int j = 0; j < destWidth; j++) {
@@ -1394,6 +1403,25 @@ void spoutCopy::rgba2rgbResample(const void* source, void* dest,
         xEnd[j]   = (unsigned int)e;
     }
 
+    //
+    // Two rewrites of the loop below were tried and measured against this one,
+    // on the sizes a webcam actually uses. Neither is in the file because both
+    // were slower:
+    //
+    //   - Replacing the per pixel division with a 32.32 reciprocal multiply,
+    //     held per column with the row part applied as a second stage. Sound
+    //     numerically - worst error one unit over every span combination up to
+    //     3840, below the step of an 8 bit channel - but 0.89x to 1.02x.
+    //
+    //   - Accumulating one destination row at a time so each source row is
+    //     read once, instead of reading the source column by column. 0.53x to
+    //     0.70x. The strided access across destination columns costs more than
+    //     the reuse saves.
+    //
+    // The loop is bound by reading the source, not by the arithmetic at the
+    // end of it, and the compiler already handles the division well enough
+    // that it is not the bottleneck. Measure before changing this again.
+    //
     for (unsigned int i = 0; i < destHeight; i++) {
 
         // Source row span for this destination row

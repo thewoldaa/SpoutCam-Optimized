@@ -58,6 +58,13 @@ static SpoutCamRate* g_pRate = nullptr;
 static bool g_bReadyForScript = false;
 static std::wstring g_lastTally;
 
+// The rate line compares what the camera delivers against what was asked for,
+// and the timer that draws it runs at 30 Hz. That selection is only ever
+// written by this program, so it is kept here and refreshed when the page
+// saves, rather than re-read from HKCU thirty times a second for a value that
+// cannot have changed in between.
+static DWORD g_wantedFps = 3;
+
 // ---------------------------------------------------------------- registry
 
 static DWORD ReadDword(const wchar_t* name, DWORD fallback)
@@ -712,11 +719,15 @@ static void PushSettingsToPage()
 {
 	if (!g_webview) return;
 
+	// Seed the cached selection here, which is the only point the value is
+	// taken from the registry rather than from an edit.
+	g_wantedFps = ReadDword(L"fps", 3);
+
 	wchar_t buf[1024];
 	swprintf_s(buf,
 		L"window.applySettings({fps:%u,res:%u,sender:\"%s\",mirror:%u,flip:%u,"
 		L"swap:%u,keyon:%u,keyrgb:%u,hard:%u,thr:%u,preview:%u});",
-		ReadDword(L"fps", 3),
+		g_wantedFps,
 		ReadDword(L"resolution", 0),
 		JsonEscape(ReadString(L"senderstart")).c_str(),
 		ReadDword(L"mirror", 0),
@@ -733,7 +744,9 @@ static void PushSettingsToPage()
 
 static void SaveSettings(const std::wstring& json)
 {
-	WriteDword(L"fps",        (DWORD)JsonInt(json, L"fps", 3));
+	g_wantedFps = (DWORD)JsonInt(json, L"fps", 3);
+
+	WriteDword(L"fps",        g_wantedFps);
 	WriteDword(L"resolution", (DWORD)JsonInt(json, L"res", 0));
 	WriteDword(L"mirror",     (DWORD)JsonInt(json, L"mirror", 0));
 	WriteDword(L"flip",       (DWORD)JsonInt(json, L"flip", 0));
@@ -849,13 +862,28 @@ static void UpdateTally()
 
 	if (!g_preview.IsVisible()) {
 		// The lamp reports the sender, not the preview, so collapsing the panel
-		// must not make it look as though nothing is running. Reading the
-		// sender's description costs nothing - no texture and no DirectX.
-		unsigned int w = 0, h = 0;
-		if (g_preview.ProbeSender(w, h)) {
+		// must not make it look as though nothing is running. No texture and no
+		// DirectX is touched, but a probe still opens and maps the sender's
+		// shared memory twice, and this timer runs at 30 Hz.
+		//
+		// A sender appearing or changing size is not something that needs to be
+		// seen within 33 milliseconds, so the answer is held for a second. The
+		// text below is only pushed to the page when it actually differs, so
+		// this does not cost a script call either.
+		static DWORD lastProbe = 0;
+		static bool  lastLive = false;
+		static unsigned int lastW = 0, lastH = 0;
+
+		const DWORD now = GetTickCount();
+		if (lastProbe == 0 || (now - lastProbe) >= 1000) {
+			lastProbe = now;
+			lastLive = g_preview.ProbeSender(lastW, lastH);
+		}
+
+		if (lastLive) {
 			live = true;
 			wchar_t buf[128];
-			swprintf_s(buf, L"%ux%u", w, h);
+			swprintf_s(buf, L"%ux%u", lastW, lastH);
 			text = buf;
 		}
 		else {
@@ -906,9 +934,10 @@ static void UpdateRate()
 	if (!g_webview || !g_bReadyForScript)
 		return;
 
-	// Index of the frame rate control, in the order the page lists them
+	// Index of the frame rate control, in the order the page lists them.
+	// Cached rather than re-read: see g_wantedFps.
 	static const int kFpsChoices[] = { 10, 15, 25, 30, 50, 60 };
-	const DWORD sel = ReadDword(L"fps", 3);
+	const DWORD sel = g_wantedFps;
 	const int wanted = kFpsChoices[sel < 6 ? sel : 3];
 
 	const bool written = (g_pRate && g_pRate->magic == kRateMagic);

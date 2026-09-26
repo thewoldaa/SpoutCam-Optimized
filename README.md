@@ -144,8 +144,8 @@ The filter:
 msbuild SpoutCam\SpoutCamDX.sln /p:Configuration=Release /p:Platform=x64
 ```
 
-Projects target toolset v145. Older Visual Studio installs will need that changed in
-the three `.vcxproj` files, or a retarget from the IDE.
+The three `.vcxproj` files target toolset v143, which is the Visual Studio 2022
+C++ toolset. An older install will need that changed, or a retarget from the IDE.
 
 The settings program:
 
@@ -232,3 +232,19 @@ Spout, the Spout SDK and SpoutCam itself are by Lynn Jarvis:
 modification of that work and would not exist without it.
 
 DirectShow base classes are Microsoft sample code.
+
+## Licence
+
+SpoutCam is free software under the GNU Lesser General Public License, either
+version 3 or, at your option, any later version. The full text is in `LICENSE`,
+and the GPL it refers to is in `COPYING`.
+
+The Spout SDK files under `SpoutCam/SpoutDX` are under the BSD 3-clause licence
+carried in their own headers.
+
+This is a modified version of SpoutCam, and the modifications are stated in
+`CHANGES.md` as the licence requires. Any problem in it is not attributable to
+the authors of the versions it came from.
+
+If you redistribute a build, the licence requires that you pass on the same
+freedoms: the source, including your changes, and these licence texts.

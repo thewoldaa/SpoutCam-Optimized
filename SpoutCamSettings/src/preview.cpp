@@ -44,10 +44,121 @@ void SpoutPreview::Destroy()
 		DestroyWindow(m_hWnd);
 		m_hWnd = nullptr;
 	}
+	ReleaseGdi();
 	m_Receiver.ReleaseReceiver();
 	m_Receiver.CloseDirectX11();
 	m_bDXok = false;
 	m_bDXtried = false;
+}
+
+//
+// Drop every cached GDI object. Called on a size change and from Destroy, so
+// nothing outlives the window it was made for.
+//
+void SpoutPreview::ReleaseGdi()
+{
+	if (m_memDc) {
+		if (m_memOld) SelectObject(m_memDc, m_memOld);
+		DeleteDC(m_memDc);
+		m_memDc = nullptr;
+		m_memOld = nullptr;
+	}
+	if (m_memBmp) { DeleteObject(m_memBmp); m_memBmp = nullptr; }
+	m_memW = m_memH = 0;
+
+	if (m_srcDc) {
+		if (m_srcOld) SelectObject(m_srcDc, m_srcOld);
+		DeleteDC(m_srcDc);
+		m_srcDc = nullptr;
+		m_srcOld = nullptr;
+	}
+	if (m_srcBmp) { DeleteObject(m_srcBmp); m_srcBmp = nullptr; }
+	m_srcBits = nullptr;
+	m_srcW = m_srcH = 0;
+
+	if (m_brBack)   { DeleteObject(m_brBack);   m_brBack = nullptr; }
+	if (m_brCheckA) { DeleteObject(m_brCheckA); m_brCheckA = nullptr; }
+	if (m_brCheckB) { DeleteObject(m_brCheckB); m_brCheckB = nullptr; }
+	if (m_fontWait) { DeleteObject(m_fontWait); m_fontWait = nullptr; }
+}
+
+//
+// Off screen composite surface, client sized. Rebuilt only when the client
+// size changes, which is when the panel is resized or the preview is opened.
+//
+void SpoutPreview::EnsureBackbuffer(HDC hdc, int cw, int ch)
+{
+	if (m_memDc && m_memW == cw && m_memH == ch)
+		return;
+
+	if (m_memDc) {
+		if (m_memOld) { SelectObject(m_memDc, m_memOld); m_memOld = nullptr; }
+		DeleteDC(m_memDc);
+		m_memDc = nullptr;
+	}
+	if (m_memBmp) { DeleteObject(m_memBmp); m_memBmp = nullptr; }
+
+	m_memDc = CreateCompatibleDC(hdc);
+	if (!m_memDc)
+		return;
+
+	m_memBmp = CreateCompatibleBitmap(hdc, cw, ch);
+	if (!m_memBmp) {
+		DeleteDC(m_memDc);
+		m_memDc = nullptr;
+		return;
+	}
+
+	m_memOld = SelectObject(m_memDc, m_memBmp);
+	m_memW = cw;
+	m_memH = ch;
+
+	if (!m_brBack)   m_brBack   = CreateSolidBrush(kBackdrop);
+	if (!m_brCheckA) m_brCheckA = CreateSolidBrush(kCheckA);
+	if (!m_brCheckB) m_brCheckB = CreateSolidBrush(kCheckB);
+}
+
+//
+// DIB section the received frame is copied into. Top down, as received.
+// Rebuilt only when the frame size changes.
+//
+void SpoutPreview::EnsureFrame(HDC hdc, int w, int h)
+{
+	if (m_srcDc && m_srcW == w && m_srcH == h)
+		return;
+
+	if (m_srcDc) {
+		if (m_srcOld) { SelectObject(m_srcDc, m_srcOld); m_srcOld = nullptr; }
+		DeleteDC(m_srcDc);
+		m_srcDc = nullptr;
+	}
+	if (m_srcBmp) { DeleteObject(m_srcBmp); m_srcBmp = nullptr; }
+	m_srcW = m_srcH = 0;
+
+	BITMAPINFO bmi = {};
+	bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth       = w;
+	bmi.bmiHeader.biHeight      = -h; // negative - top down, as received
+	bmi.bmiHeader.biPlanes      = 1;
+	bmi.bmiHeader.biBitCount    = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+
+	m_srcDc = CreateCompatibleDC(hdc);
+	if (!m_srcDc)
+		return;
+
+	m_srcBmp = CreateDIBSection(m_srcDc, &bmi, DIB_RGB_COLORS, &m_srcBits, nullptr, 0);
+	if (!m_srcBmp || !m_srcBits) {
+		if (m_srcBmp) { DeleteObject(m_srcBmp); m_srcBmp = nullptr; }
+		DeleteDC(m_srcDc);
+		m_srcDc = nullptr;
+		m_srcBits = nullptr;
+		return;
+	}
+
+	m_srcOld = SelectObject(m_srcDc, m_srcBmp);
+	m_srcW = w;
+	m_srcH = h;
 }
 
 void SpoutPreview::SetRect(int x, int y, int w, int h, bool bShow)
@@ -67,6 +178,18 @@ void SpoutPreview::SetRect(int x, int y, int w, int h, bool bShow)
 		m_Receiver.ReleaseReceiver();
 		m_bConnected = false;
 		m_bFrameValid = false;
+		// The frame DIB can be a few megabytes at sender size and is not used
+		// while the panel is collapsed, so it does not stay resident. The
+		// brushes and the off screen surface are small and are kept, since
+		// reopening the preview is a common toggle.
+		if (m_srcDc) {
+			if (m_srcOld) { SelectObject(m_srcDc, m_srcOld); m_srcOld = nullptr; }
+			DeleteDC(m_srcDc);
+			m_srcDc = nullptr;
+		}
+		if (m_srcBmp) { DeleteObject(m_srcBmp); m_srcBmp = nullptr; }
+		m_srcBits = nullptr;
+		m_srcW = m_srcH = 0;
 		return;
 	}
 
@@ -256,21 +379,26 @@ void SpoutPreview::Tick()
 	InvalidateRect(m_hWnd, nullptr, FALSE);
 }
 
-void SpoutPreview::DrawChecker(HDC hdc, int w, int h) const
+void SpoutPreview::DrawChecker(HDC hdc, int x0, int y0, int w, int h) const
 {
-	HBRUSH a = CreateSolidBrush(kCheckA);
-	HBRUSH b = CreateSolidBrush(kCheckB);
+	// Brushes are owned by the caller and reused across repaints
+	if (!m_brCheckA || !m_brCheckB)
+		return;
 
+	// Drawn at the destination position rather than offsetting the window
+	// origin and clipping to a region. The region was created and destroyed on
+	// every repaint, and the checkerboard is only ever wanted under the image,
+	// which is exactly what these bounds say.
 	for (int y = 0; y < h; y += kCheckSize) {
 		for (int x = 0; x < w; x += kCheckSize) {
-			RECT cell = { x, y, min(x+kCheckSize, w), min(y+kCheckSize, h) };
+			RECT cell = {
+				x0+x, y0+y,
+				x0+min(x+kCheckSize, w), y0+min(y+kCheckSize, h)
+			};
 			const bool bAlt = ((x/kCheckSize) + (y/kCheckSize)) % 2 == 0;
-			FillRect(hdc, &cell, bAlt ? a : b);
+			FillRect(hdc, &cell, bAlt ? m_brCheckA : m_brCheckB);
 		}
 	}
-
-	DeleteObject(a);
-	DeleteObject(b);
 }
 
 void SpoutPreview::Paint(HDC hdc)
@@ -283,14 +411,21 @@ void SpoutPreview::Paint(HDC hdc)
 		return;
 
 	// Draw the whole panel off screen first, otherwise the checkerboard
-	// flickers against the frame on every repaint
-	HDC     mem = CreateCompatibleDC(hdc);
-	HBITMAP bmp = CreateCompatibleBitmap(hdc, cw, ch);
-	HGDIOBJ old = SelectObject(mem, bmp);
+	// flickers against the frame on every repaint.
+	//
+	// The surfaces and brushes are cached across repaints - see the note on
+	// ReleaseGdi in preview.h. This runs at 30 Hz, and building them here each
+	// time was the single largest cost in the panel.
+	EnsureBackbuffer(hdc, cw, ch);
+	if (!m_memDc) {
+		// Nothing to composite into - leave the window as it is rather than
+		// painting into the screen DC and flickering
+		return;
+	}
 
-	HBRUSH back = CreateSolidBrush(kBackdrop);
-	FillRect(mem, &rc, back);
-	DeleteObject(back);
+	HDC mem = m_memDc;
+
+	FillRect(mem, &rc, m_brBack);
 
 	if (m_bFrameValid && m_PixWidth > 0 && m_PixHeight > 0) {
 
@@ -298,31 +433,12 @@ void SpoutPreview::Paint(HDC hdc)
 		const int oy = (ch-m_PixHeight)/2;
 
 		// Checkerboard only under the image, so letterbox bars stay black
-		HRGN clip = CreateRectRgn(ox, oy, ox+m_PixWidth, oy+m_PixHeight);
-		SelectClipRgn(mem, clip);
-		SetWindowOrgEx(mem, -ox, -oy, nullptr);
-		DrawChecker(mem, m_PixWidth, m_PixHeight);
-		SetWindowOrgEx(mem, 0, 0, nullptr);
-		SelectClipRgn(mem, nullptr);
-		DeleteObject(clip);
+		DrawChecker(mem, ox, oy, m_PixWidth, m_PixHeight);
 
-		BITMAPINFO bmi = {};
-		bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-		bmi.bmiHeader.biWidth       = m_PixWidth;
-		bmi.bmiHeader.biHeight      = -m_PixHeight; // negative - top down, as received
-		bmi.bmiHeader.biPlanes      = 1;
-		bmi.bmiHeader.biBitCount    = 32;
-		bmi.bmiHeader.biCompression = BI_RGB;
-
-		const unsigned char* display = m_Pixels.data();
-		const size_t displaySize = (size_t)m_PixWidth*m_PixHeight*4;
-
-		HDC     src    = CreateCompatibleDC(mem);
-		void*   bits   = nullptr;
-		HBITMAP srcbmp = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-		if (srcbmp && bits) {
-			memcpy(bits, display, displaySize);
-			HGDIOBJ oldsrc = SelectObject(src, srcbmp);
+		EnsureFrame(mem, m_PixWidth, m_PixHeight);
+		if (m_srcDc && m_srcBits) {
+			memcpy(m_srcBits, m_Pixels.data(),
+				(size_t)m_PixWidth*m_PixHeight*4);
 
 			BLENDFUNCTION bf = {};
 			bf.BlendOp             = AC_SRC_OVER;
@@ -330,32 +446,28 @@ void SpoutPreview::Paint(HDC hdc)
 			bf.AlphaFormat         = AC_SRC_ALPHA; // premultiplied above
 
 			AlphaBlend(mem, ox, oy, m_PixWidth, m_PixHeight,
-				src, 0, 0, m_PixWidth, m_PixHeight, bf);
-
-			SelectObject(src, oldsrc);
-			DeleteObject(srcbmp);
+				m_srcDc, 0, 0, m_PixWidth, m_PixHeight, bf);
 		}
-		DeleteDC(src);
 	}
 	else {
 		// Nothing arriving - say so rather than showing an empty black box
 		SetBkMode(mem, TRANSPARENT);
 		SetTextColor(mem, RGB(120, 126, 136));
-		HFONT font = CreateFontW(-11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-			DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-			DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-		HGDIOBJ oldfont = SelectObject(mem, font);
+		if (!m_fontWait) {
+			m_fontWait = CreateFontW(-11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+				DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+				DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+		}
+		HGDIOBJ oldfont = nullptr;
+		if (m_fontWait)
+			oldfont = SelectObject(mem, m_fontWait);
 		DrawTextW(mem, L"waiting for a sender", -1, &rc,
 			DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-		SelectObject(mem, oldfont);
-		DeleteObject(font);
+		if (oldfont)
+			SelectObject(mem, oldfont);
 	}
 
 	BitBlt(hdc, 0, 0, cw, ch, mem, 0, 0, SRCCOPY);
-
-	SelectObject(mem, old);
-	DeleteObject(bmp);
-	DeleteDC(mem);
 }
 
 LRESULT CALLBACK SpoutPreview::WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
