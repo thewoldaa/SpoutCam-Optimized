@@ -1,0 +1,2 @@
+87e7c88a868f154db2692634545ac76b5c1eddaade7db4aefcde178a37dc7300 *SpoutCam-Optimized-x64.zip
+65a370572fa4a2229ed6e181ec76f991d0d5d2a19cec2ff37b2cce4bcd14fbf2 *SpoutCam-Optimized-x86.zip
