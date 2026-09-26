@@ -1,34 +1,36 @@
-# SpoutCam Optimized — release files
+# SpoutCam 1.1.0
 
-Two architectures. Take the one that matches the program you want the camera
-in, not the one that matches Windows. A 64-bit Windows runs both.
+A DirectShow virtual webcam that receives a Spout sender, built for getting
+VRChat into streaming software with no Spout support of its own.
 
-## Which one
+This is a fork of [ardha27/SpoutCam](https://github.com/ardha27/SpoutCam), taken
+from 1.0.4. What changed is in `CHANGES.md` in the repository, and in the release
+notes.
 
-| You want the camera in | Download |
-|---|---|
-| OBS, TikTok Live Studio, most modern 64-bit programs | `SpoutCam-Optimized-x64.zip` |
-| A 32-bit program | `SpoutCam-Optimized-x86.zip` |
-
-If you are not sure, take x64. Nearly everything is 64-bit now.
-
-You can install both. They are separate builds of the same camera and register
-under the same name, so installing the second replaces the first rather than
-adding a second camera.
-
-## What is in each zip
+## What is in the download
 
 ```
-SpoutCam.exe        the settings panel — run this
-SpoutCam64.ax       the camera itself (x86 zip has SpoutCam32.ax)
+SpoutCam\README.md            the full documentation
+SpoutCam\SpoutCam.exe         64-bit settings panel — run this
+SpoutCam\SpoutCam32.exe       32-bit settings panel
+SpoutCam\filter\SpoutCam64.ax 64-bit camera
+SpoutCam\filter\SpoutCam32.ax 32-bit camera
+SpoutCam\LICENSE              LGPL v3
+SpoutCam\COPYING              GPL v3
 ```
 
-Both files must stay in the same folder. The panel looks for the filter beside
-itself, and the Install button will not work if they are separated.
+Keep the whole folder together. The panel looks for the filter in `filter\`
+beside itself, and the Install button will not find it if the two are separated.
 
-## Installing
+## Which panel to run
 
-1. Unzip anywhere — Desktop is fine.
+Run `SpoutCam.exe` unless you are feeding a 32-bit program. Both are the same
+camera and register under the same name, so installing one over the other
+replaces it rather than adding a second.
+
+## Install
+
+1. Unzip anywhere.
 2. Run `SpoutCam.exe`.
 3. Press **Install** under Camera. Windows asks for administrator rights once,
    because a DirectShow filter is registered machine wide. Every virtual camera
@@ -36,23 +38,24 @@ itself, and the Install button will not work if they are separated.
 4. The program copies itself to `C:\Program Files\SpoutCam` and registers from
    there, so the folder you unzipped to can be deleted afterwards.
 
-Programs that were already open need restarting before they will see the
-camera.
+Programs that were already open need closing and reopening before they will see
+the camera. A loaded filter is never reloaded, so removing and re-adding the
+source is not enough on its own.
 
 ## Using it
 
-The camera only passes frames through while the settings panel is running —
-the same way OBS owns its virtual camera. Minimise it and it drops to the
+The camera only passes frames through while the settings panel is running, the
+same way OBS owns its virtual camera. Minimise it and it drops to the
 notification area and keeps working. Quit it and the camera goes idle and shows
 its name plate instead of the picture.
 
-Start a Spout sender (VRChat with Spout enabled, or any Spout output), then open
+Start a Spout sender — VRChat with Spout enabled, or any Spout output — then open
 the panel and turn on **Live preview** to confirm frames are arriving.
 
 ## Antivirus
 
 The binaries are unsigned, so SmartScreen warns on first run and some scanners
-flag DirectShow filters on principle because they are DLLs that register
+flag DirectShow filters on principle, because they are DLLs that register
 themselves into the system. No trick fixes this, only an Authenticode
 certificate. Nothing here is packed or obfuscated.
 
@@ -65,14 +68,15 @@ sha256sum -c SHA256SUMS.txt
 or on Windows:
 
 ```
-certutil -hashfile SpoutCam.exe SHA256
+certutil -hashfile SpoutCam-1.1.0-win64.zip SHA256
 ```
 
-## Source
+## Licence
 
-Built from https://github.com/thewoldaa/SpoutCam-Optimized at the tag named in
-the release. LGPL v3 — the source and the licence texts are in the repository.
+LGPL v3. The source is at
+https://github.com/thewoldaa/SpoutCam-Optimized, and the licence texts are in
+this folder as well as in the repository.
 
-This is a modified version of SpoutCam. The modifications are listed in
-`CHANGES.md` there. Problems in it are not attributable to the authors of the
-versions it came from.
+This is a modified version of SpoutCam. The modifications are stated in
+`CHANGES.md` as the licence requires, and problems in it are not attributable to
+the authors of the versions it came from.
