@@ -1339,6 +1339,65 @@ HRESULT CVCamStream::SetMediaType(const CMediaType *pmt)
     return hr;
 }
 
+//
+// Sizes the pin offers to a host.
+//
+// The camera resamples the sender into whatever size gets negotiated, so every
+// one of these is valid no matter what the sender is producing. ReceiveImage
+// already handles the size difference.
+//
+// This used to be a single size - whatever g_Width happened to be at the moment
+// the host asked - and the pin then refused anything else. A host that wanted a
+// different size could not connect at all. Discord asks for 640x480, which was
+// never on offer, so the camera could not be selected there while every other
+// application that happened to accept 1280x720 worked.
+//
+static const unsigned int kSizeCount = 11;
+static const unsigned int kSizes[kSizeCount][2] = {
+	{  320,  240 }, {  640,  360 }, {  640,  480 }, {  800,  600 },
+	{ 1024,  720 }, { 1024,  768 }, { 1280,  720 }, { 1280,  960 },
+	{ 1920, 1080 }, { 2560, 1440 }, { 3840, 2160 },
+};
+
+//
+// Position 0 is whatever the pin is set to now, which follows the active sender
+// when the user asked for that. The rest are the standard sizes, less any that
+// would repeat the current one.
+//
+static int AdvertisedSizeCount(unsigned int curW, unsigned int curH)
+{
+	int n = 1;
+	for (unsigned int i = 0; i < kSizeCount; i++) {
+		if (kSizes[i][0] == curW && kSizes[i][1] == curH)
+			continue;
+		n++;
+	}
+	return n;
+}
+
+static bool AdvertisedSize(int index, unsigned int curW, unsigned int curH,
+	unsigned int& w, unsigned int& h)
+{
+	if (index == 0) {
+		w = curW;
+		h = curH;
+		return true;
+	}
+
+	int n = 1;
+	for (unsigned int i = 0; i < kSizeCount; i++) {
+		if (kSizes[i][0] == curW && kSizes[i][1] == curH)
+			continue;
+		if (n == index) {
+			w = kSizes[i][0];
+			h = kSizes[i][1];
+			return true;
+		}
+		n++;
+	}
+	return false;
+}
+
 // See Directshow help topic for IAMStreamConfig for details on this method
 HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 {
@@ -1348,22 +1407,11 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 		return E_INVALIDARG;
 	}
 
-	// One position only, matching GetNumberOfCapabilities and the intent noted
-	// in the revision history. Both positions used to build the same media type
-	// from g_Width and g_Height, so the second was a duplicate that made some
-	// hosts ask twice and pick the copy.
-	if (iPosition > 0) {
-		return VFW_S_NO_MORE_ITEMS;
-	}
-
 	// The sender may have started since the filter was created
 	RefreshSenderResolution();
 
-	DECLARE_PTR(VIDEOINFOHEADER, pvi, pmt->AllocFormatBuffer(sizeof(VIDEOINFOHEADER)));
-    ZeroMemory(pvi, sizeof(VIDEOINFOHEADER));
-
- 	// Allow for default
 	if(g_Width == 0 || g_Height == 0) {
+		// Allow for default
 		width  = 1280;
 		height = 720;
 	}
@@ -1372,6 +1420,14 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 		width	=  g_Width;
 		height	=  g_Height;
 	}
+
+	// Offer every advertised size, not just the current one
+	if (!AdvertisedSize(iPosition, width, height, width, height)) {
+		return VFW_S_NO_MORE_ITEMS;
+	}
+
+	DECLARE_PTR(VIDEOINFOHEADER, pvi, pmt->AllocFormatBuffer(sizeof(VIDEOINFOHEADER)));
+    ZeroMemory(pvi, sizeof(VIDEOINFOHEADER));
 
 	pvi->bmiHeader.biSize				= sizeof(BITMAPINFOHEADER);
 	pvi->bmiHeader.biWidth				= (LONG)width;
@@ -1406,13 +1462,75 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 } // GetMediaType
 
 
-// This method is called to see if a given output format is supported
+//
+// Shared shape check for a video media type.
+//
+// CheckMediaType and SetFormat both need this, and they are handed different
+// types - CMediaType from the pin negotiation, a plain AM_MEDIA_TYPE from
+// IAMStreamConfig - so the check takes the parts it needs rather than either
+// class. It is deliberately structural: the pin used to demand exact equality
+// with m_mt, which limited it to a single size.
+//
+static bool IsAcceptableVideoType(const AM_MEDIA_TYPE *pmt)
+{
+	if (!pmt || !pmt->pbFormat)
+		return false;
+
+	if (pmt->majortype != MEDIATYPE_Video)
+		return false;
+	if (pmt->subtype != MEDIASUBTYPE_RGB24)
+		return false;
+	if (pmt->formattype != FORMAT_VideoInfo)
+		return false;
+	if (pmt->cbFormat < sizeof(VIDEOINFOHEADER))
+		return false;
+
+	const VIDEOINFOHEADER *pvi = (const VIDEOINFOHEADER *)pmt->pbFormat;
+	if (pvi->bmiHeader.biBitCount != 24)
+		return false;
+
+	const unsigned int w = (unsigned int)pvi->bmiHeader.biWidth;
+	const unsigned int h = (unsigned int)pvi->bmiHeader.biHeight;
+
+	// Zero or odd dimensions would make the row maths in the resampler wrong.
+	// RGB24 rows are padded to a DWORD, so a width that is not a multiple of
+	// four is what the padding exists for, but the filter keeps its own widths
+	// aligned and nothing else asks for one.
+	if (w == 0 || h == 0 || (w % 4) != 0)
+		return false;
+
+	// A ceiling matching GetStreamCaps, so a host cannot ask for a frame larger
+	// than the advertised maximum
+	if (w > 3840 || h > 2160)
+		return false;
+
+	return true;
+}
+
+//
+// Accept any RGB24 size the pin advertises.
+//
+// This compared against m_mt for exact equality, which meant the pin accepted
+// one size only: whatever the media type happened to be when the host asked.
+// Every other size came back E_INVALIDARG, so a host that wanted a different
+// one could not connect at all. That is why Discord, which asks for 640x480,
+// never got a picture while applications that happened to take 1280x720 worked.
+//
+// Checking the shape of the type instead of its identity is safe here because
+// the filter resamples the sender into whatever size is agreed - ReceiveImage
+// has always handled a size difference. The base class stores the agreed type
+// into m_mt once this returns S_OK, and FillBuffer takes the frame size from
+// there, so the two stay in step.
+//
 HRESULT CVCamStream::CheckMediaType(const CMediaType *pMediaType)
 {
-	if(*pMediaType != m_mt) 
-        return E_INVALIDARG;
+	if (!pMediaType || !pMediaType->IsValid())
+		return E_INVALIDARG;
 
-    return S_OK;
+	if (!IsAcceptableVideoType(pMediaType))
+		return E_INVALIDARG;
+
+	return S_OK;
 } // CheckMediaType
 
 //
@@ -1470,19 +1588,41 @@ HRESULT STDMETHODCALLTYPE CVCamStream::SetFormat(AM_MEDIA_TYPE *pmt)
 	// http://kbi.theelude.eu/?p=161
 	if(!pmt) return S_OK; // Default? red5
 
-	VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER *)(pmt->pbFormat);
-	VIDEOINFOHEADER *mvi = (VIDEOINFOHEADER *)(m_mt.Format ());
+	if (!pmt->pbFormat || pmt->cbFormat < sizeof(VIDEOINFOHEADER))
+		return VFW_E_INVALIDMEDIATYPE;
 
-	if(pvi->bmiHeader.biHeight !=mvi->bmiHeader.biHeight || 
-		pvi->bmiHeader.biWidth  != mvi->bmiHeader.biWidth || 
-		pvi->bmiHeader.biBitCount !=mvi->bmiHeader.biBitCount  )
-		return VFW_E_INVALIDMEDIATYPE;	
+	VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER *)(pmt->pbFormat);
+
+	// The size check used to compare against m_mt, so a host could only ever
+	// set the size the pin already had. It now accepts anything the pin is
+	// willing to produce - see the note on IsAcceptableVideoType.
+	if (!IsAcceptableVideoType(pmt))
+		return VFW_E_INVALIDMEDIATYPE;
 
 	// maximum fps - minimum frame time
 	if(pvi->AvgTimePerFrame < 10000000/60)
 		return VFW_E_INVALIDMEDIATYPE;
 	if(pvi->AvgTimePerFrame < 1)
 		return VFW_E_INVALIDMEDIATYPE;
+
+	// Take the new size. FillBuffer reads the frame size out of m_mt on every
+	// call, so this is what makes the resampler produce the negotiated size
+	// rather than the one it was constructed with.
+	//
+	// CMediaType::Set is used rather than FreeMediaType/CopyMediaType because
+	// m_mt owns its format block through CMediaType's own allocator, and the
+	// free functions would leave it pointing at memory the class does not know
+	// it has to release.
+	CAutoLock cSettingsLock(&m_cSharedState);
+
+	if (FAILED(m_mt.Set(*pmt)))
+		return VFW_E_INVALIDMEDIATYPE;
+
+	VIDEOINFOHEADER *mvi = (VIDEOINFOHEADER *)(m_mt.Format());
+	if (mvi) {
+		g_Width  = (unsigned int)mvi->bmiHeader.biWidth;
+		g_Height = (unsigned int)mvi->bmiHeader.biHeight;
+	}
 
     return S_OK;
 }
@@ -1495,24 +1635,32 @@ HRESULT STDMETHODCALLTYPE CVCamStream::GetFormat(AM_MEDIA_TYPE **ppmt)
 
 HRESULT STDMETHODCALLTYPE CVCamStream::GetNumberOfCapabilities(int *piCount, int *piSize)
 {
-	*piCount = 1; // LJ
+	if (!piCount || !piSize)
+		return E_POINTER;
+
+	// Must match what GetMediaType will serve. It used to report one while
+	// GetMediaType offered a different set, and a host that trusted the count
+	// stopped asking before it reached the size it wanted.
+	unsigned int w = g_Width, h = g_Height;
+	if (w == 0 || h == 0) { w = 1280; h = 720; }
+
+	*piCount = AdvertisedSizeCount(w, h);
     *piSize = sizeof(VIDEO_STREAM_CONFIG_CAPS);
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE **pmt, BYTE *pSCC)
 {
+	if (!pmt || !pSCC)
+		return E_POINTER;
+
+	if (iIndex < 0)
+		return E_INVALIDARG;
 
 	unsigned int width, height;
 
 	// The sender may have started since the filter was created
 	RefreshSenderResolution();
-
-    *pmt = CreateMediaType(&m_mt);
-
-    DECLARE_PTR(VIDEOINFOHEADER, pvi, (*pmt)->pbFormat);
-
-	if (iIndex == 0) iIndex = 1;
 
 	if(g_Width == 0 || g_Height == 0) {
 		width  = 1280;
@@ -1522,6 +1670,23 @@ HRESULT STDMETHODCALLTYPE CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE *
 		// as per sending app
 		width	=  g_Width;
 		height	=  g_Height;
+	}
+
+	// Index 0 is the current size, the rest are the standard ones. This used
+	// to shift index 0 to 1, which meant the first capability a host asked for
+	// was never the one the pin was actually set to.
+	if (!AdvertisedSize(iIndex, width, height, width, height))
+		return VFW_E_INVALIDMEDIATYPE;
+
+    *pmt = CreateMediaType(&m_mt);
+	if (!*pmt)
+		return E_OUTOFMEMORY;
+
+    DECLARE_PTR(VIDEOINFOHEADER, pvi, (*pmt)->pbFormat);
+	if (!pvi) {
+		DeleteMediaType(*pmt);
+		*pmt = nullptr;
+		return E_OUTOFMEMORY;
 	}
 
 	pvi->bmiHeader.biCompression	= BI_RGB;
@@ -1543,14 +1708,14 @@ HRESULT STDMETHODCALLTYPE CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE *
     (*pmt)->bFixedSizeSamples		= false;
     (*pmt)->lSampleSize				= pvi->bmiHeader.biSizeImage;
     (*pmt)->cbFormat				= sizeof(VIDEOINFOHEADER);
-    
+
     DECLARE_PTR(VIDEO_STREAM_CONFIG_CAPS, pvscc, pSCC);
-    
+
     pvscc->guid = FORMAT_VideoInfo;
     pvscc->VideoStandard = AnalogVideo_None;
-	// Native size of the incoming video signal. 
+	// Native size of the incoming video signal.
 	// For a compressor, the size is taken from the input pin.
-	// For a capture filter, the size is the largest signal the filter 
+	// For a capture filter, the size is the largest signal the filter
 	// can digitize with every pixel remaining unique.
 	// Note  Deprecated.
 	pvscc->InputSize.cx         = (LONG)width; // 1920;
@@ -1579,7 +1744,7 @@ HRESULT STDMETHODCALLTYPE CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE *
     pvscc->MinBitsPerSecond     = (80*60*4*8)/5; // At 80x50 resolution and 5 fps
     // 1920 * 1080 * 4 * 8 * 60; // (integral overflow at 60 fps)
 	// Anyway 1920x1080 might not achieve 60fps
-	pvscc->MaxBitsPerSecond = LONG_MAX; 
+	pvscc->MaxBitsPerSecond = LONG_MAX;
 
     return S_OK;
 }

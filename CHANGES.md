@@ -25,6 +25,42 @@ fork adds on top.
 
 ### Fixed
 
+**The camera could only ever connect at one size.** This was the reason it
+worked in some programs and not others. `CheckMediaType` compared the offered
+media type against `m_mt` for exact equality, so the pin accepted only whatever
+size happened to be current and returned `E_INVALIDARG` for everything else.
+Discord asks for 640x480, which was never on offer, so the camera could not be
+selected there at all while applications that accepted 1280x720 worked.
+
+Three places had to agree, and none of them did:
+
+- `CheckMediaType` now checks the shape of the type - RGB24, 24bpp, width a
+  multiple of four, within the advertised ceiling - instead of its identity.
+  This is safe because the filter resamples the sender into whatever size is
+  agreed; `ReceiveImage` has always handled a size difference.
+- `GetMediaType` and `GetStreamCaps` now advertise a list of sizes from 320x240
+  to 3840x2160, with the sender's own size first, rather than a single one.
+- `GetNumberOfCapabilities` reports the number actually served. It reported one
+  while a different set was on offer, and a host that trusted the count stopped
+  asking before it reached the size it wanted.
+
+`GetStreamCaps` also shifted index 0 to 1, so the first capability a host asked
+for was never the one the pin was actually set to.
+
+`SetFormat` validated the requested size and then discarded it, leaving `m_mt`
+at its old value. It now takes the new type under the settings lock, which is
+what makes `FillBuffer` produce the negotiated size.
+
+Measured before and after, on the machine the problem was reported on:
+
+```
+             before    after
+320x240      failed    ok
+640x480      failed    ok
+1280x720     ok        ok
+1920x1080    failed    ok
+```
+
 **Race on the media type during a settings change.** `m_cSharedState` was
 declared on the pin and never used. `put_Settings` runs on the property page
 thread and its final `GetMediaType` call can reallocate the format buffer that
@@ -36,11 +72,6 @@ that lock, and `put_Settings` takes it.
 **Uninitialised variable in `SetResolution`.** `unsigned int width, height = 0;`
 left `width` uninitialised before being passed to `GetSenderInfo` as an output
 parameter.
-
-**Capability count did not match what the pin offered.** `GetNumberOfCapabilities`
-reported one format while `GetMediaType` served two, and both positions built
-the same media type from the same globals. Reduced to the single position the
-revision history already intended.
 
 **Live settings were re-read on a frame count.** `NumFrames % 60` meant the
 interval was whatever sixty frames happened to be, so a checkbox took six
